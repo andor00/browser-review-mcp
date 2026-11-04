@@ -60,8 +60,12 @@ accept it or reopen it.
 
 <img src="docs/screenshots/side-panel-claude-working.png" alt="The side panel next to the page, with three threads Claude is working on" width="800">
 
-Try it yourself on the demo app in this repo: `pnpm demo` (see
-[Try it on the demo app](#try-it-on-the-demo-app)).
+## Sponsor
+
+<a href="https://stabiloworld.com/"><img src="docs/sponsors/stabilo-international.png" alt="Stabilo International B.V." width="300"></a>
+
+Browser Review was made possible by [Stabilo International B.V.](https://stabiloworld.com/),
+which needed a tool like this and supported its development. Thank you!
 
 ## Setup
 
@@ -353,13 +357,6 @@ pnpm typecheck
 pnpm test               # all tests (the MCP one runs it over stdio like Claude Code)
 pnpm build              # extension/dist, extension/dist-firefox, server/dist/cli.js
 ```
-
-## Sponsor
-
-<a href="https://stabiloworld.com/"><img src="docs/sponsors/stabilo-international.png" alt="Stabilo International B.V." width="300"></a>
-
-Browser Review was made possible by [Stabilo International B.V.](https://stabiloworld.com/),
-which needed a tool like this and supported its development. Thank you!
 
 ## License
 
