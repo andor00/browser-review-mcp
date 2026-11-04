@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Review",
+  "version": "0.1.0",
+  "description": "Comment on, remove and edit elements of your localhost dev app. Claude picks the comments up over MCP.",
+  "minimum_chrome_version": "120",
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "action": {
+    "default_title": "Browser Review: show or hide the overlay",
+    "default_icon": { "16": "icons/16.png", "48": "icons/48.png" }
+  },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["main-world.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "toggle-overlay": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Show or hide the review overlay"
+    }
+  }
+}

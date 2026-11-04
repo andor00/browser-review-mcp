@@ -1,0 +1,21 @@
+{
+  "name": "browser-review-mcp",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "packageManager": "pnpm@12.9.1",
+  "scripts": {
+    "server": "pnpm --dir server start",
+    "dev:server": "pnpm --dir server dev",
+    "build": "pnpm --dir extension build",
+    "dev:extension": "pnpm --dir extension dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

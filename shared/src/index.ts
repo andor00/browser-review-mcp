@@ -1,0 +1,159 @@
+// Types and small helpers shared by the review server and the extension.
+// Keep this file free of Node or DOM APIs: it runs in both places.
+
+export const STATUSES = ['open', 'in_progress', 'review_ready', 'accepted'] as const;
+export type Status = (typeof STATUSES)[number];
+
+export const KINDS = ['comment', 'remove', 'edit'] as const;
+export type Kind = (typeof KINDS)[number];
+
+export type Author = 'user' | 'claude' | 'system';
+
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface Viewport {
+  width: number;
+  height: number;
+  dpr: number;
+}
+
+/** Everything we know about the element a comment is pinned to. */
+export interface TargetInfo {
+  /** Best first. The extension tries them in order to find the element again. */
+  selectors: string[];
+  tag: string;
+  /** Visible text, trimmed and shortened. */
+  text: string;
+  /** Short piece of outerHTML. */
+  html: string;
+  /** Position in the viewport when the comment was made. */
+  rect: Rect;
+  /** React components from outer to inner, for example ["CaseOverview", "EvidenceTable", "Row"]. */
+  components: string[];
+  /** File that rendered the element, from React's dev stack. Line is approximate. */
+  source: string | null;
+}
+
+export interface TextChange {
+  /** Index among the non-empty text nodes inside the element. */
+  index: number;
+  before: string;
+  after: string;
+}
+
+export type Change =
+  | { kind: 'remove' }
+  | { kind: 'edit'; texts: TextChange[]; css: string };
+
+export interface Message {
+  id: number;
+  author: Author;
+  body: string;
+  createdAt: string;
+}
+
+export interface Solution {
+  note: string;
+  files: string[];
+  createdAt: string;
+}
+
+export type ScreenshotKind = 'page' | 'element';
+export type ScreenshotSource = 'initial' | 'capture';
+
+export interface ScreenshotMeta {
+  id: number;
+  kind: ScreenshotKind;
+  source: ScreenshotSource;
+  createdAt: string;
+}
+
+export interface Comment {
+  id: number;
+  kind: Kind;
+  status: Status;
+  /** For example "http://localhost:5173". */
+  origin: string;
+  /** For example "/cases/12". No query string, no trailing slash (except "/"). */
+  path: string;
+  /** Full URL when the comment was made. */
+  url: string;
+  title: string;
+  viewport: Viewport;
+  target: TargetInfo | null;
+  change: Change | null;
+  messages: Message[];
+  solution: Solution | null;
+  screenshots: ScreenshotMeta[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Screenshots travel as PNG data URLs ("data:image/png;base64,..."). */
+export interface ScreenshotUpload {
+  page?: string;
+  element?: string;
+}
+
+export interface CreateCommentInput {
+  kind: Kind;
+  url: string;
+  title: string;
+  viewport: Viewport;
+  target: TargetInfo | null;
+  change: Change | null;
+  body: string;
+  screenshots?: ScreenshotUpload;
+}
+
+/** Messages on the WebSocket between server and extension background. */
+export type ServerToExtension =
+  | { type: 'hello'; version: string }
+  | { type: 'comments-changed'; origin: string }
+  | { type: 'capture-request'; requestId: string; comment: Comment }
+  | { type: 'ping' };
+
+export type ExtensionToServer =
+  | {
+      type: 'capture-result';
+      requestId: string;
+      ok: true;
+      page: string;
+      element: string | null;
+      note: string | null;
+    }
+  | { type: 'capture-result'; requestId: string; ok: false; error: string }
+  | { type: 'pong' };
+
+export const STATUS_LABELS: Record<Status, string> = {
+  open: 'Open',
+  in_progress: 'In progress',
+  review_ready: 'Review ready',
+  accepted: 'Accepted',
+};
+
+export const KIND_LABELS: Record<Kind, string> = {
+  comment: 'Comment',
+  remove: 'Remove',
+  edit: 'Edit',
+};
+
+/** Splits a URL into the origin and normalised path used to group comments per page. */
+export function pageKey(url: string): { origin: string; path: string } {
+  const u = new URL(url);
+  let path = u.pathname || '/';
+  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  return { origin: u.origin, path };
+}
+
+/** The visual preview of a remove or edit is only shown while Claude has not delivered a fix yet. */
+export function isPreviewActive(c: Pick<Comment, 'kind' | 'status'>): boolean {
+  return c.kind !== 'comment' && (c.status === 'open' || c.status === 'in_progress');
+}
+
+export const DEFAULT_PORT = 4777;
