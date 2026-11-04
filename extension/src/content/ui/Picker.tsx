@@ -8,6 +8,8 @@ import { px } from '../px.ts';
 interface Props {
   /** Started by holding this key (its label): releasing it stops. */
   releaseKey?: string | null;
+  /** Mouse position when it starts: highlight what is there right away. */
+  start?: { x: number; y: number } | null;
   onPick: (el: Element) => void;
   onCancel: () => void;
 }
@@ -24,8 +26,11 @@ function ancestry(el: Element): Element[] {
   return out;
 }
 
-export function Picker({ releaseKey, onPick, onCancel }: Props) {
-  const [chain, setChain] = useState<Element[]>([]);
+export function Picker({ releaseKey, start, onPick, onCancel }: Props) {
+  const [chain, setChain] = useState<Element[]>(() => {
+    const hit = start ? hitAt(start.x, start.y) : null;
+    return hit ? ancestry(hit) : [];
+  });
   const [depth, setDepth] = useState(0);
   const current = chain[Math.min(depth, chain.length - 1)] ?? null;
   const state = useRef({ chain, current, onPick, onCancel });

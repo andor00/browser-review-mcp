@@ -18,7 +18,32 @@ export type ContentRequest =
   | { type: 'capture'; rect: Rect | null; viewport: Viewport }
   | { type: 'screenshot-data'; id: number }
   | { type: 'open-help'; section?: string }
-  | { type: 'status' };
+  | { type: 'status' }
+  /** Open the threads side panel of the sender's window, optionally on one thread. Answer: PanelResponse. */
+  | { type: 'open-panel'; focus?: number }
+  | { type: 'close-panel' }
+  /** Show this thread in the side panel, if it is open. */
+  | { type: 'focus-thread'; id: number }
+  /** Answer: PanelState. */
+  | { type: 'panel-state' };
+
+/** The browser may refuse to open the panel from a click in the page (no user gesture). */
+export interface PanelResponse {
+  ok: boolean;
+}
+
+export interface PanelState {
+  /** The browser has a side panel for extensions (Chrome sidePanel, Firefox sidebar). */
+  supported: boolean;
+  /** The threads panel is open in the sender's window. */
+  open: boolean;
+}
+
+/** Background -> side panel page (chrome.runtime.sendMessage). */
+export type PanelRequest = { type: 'panel-close'; windowId: number };
+
+/** chrome.storage.session key: the thread the side panel should show. */
+export const PANEL_FOCUS_KEY = 'panelFocus';
 
 export type StoreResponse<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -46,7 +71,18 @@ export type TabRequest =
   | { type: 'toggle' }
   | { type: 'command'; command: OverlayCommand }
   | { type: 'prepare-capture'; comment: Comment }
-  | { type: 'capture-done' };
+  | { type: 'capture-done' }
+  /** Extension icon with the side panel: show or hide the overlay along with it. */
+  | { type: 'show'; visible: boolean }
+  | { type: 'panel-state'; open: boolean }
+  /** From the side panel: outline this thread's element (null: none). */
+  | { type: 'hover'; id: number | null }
+  /** From the side panel: Go to. Answer: GoToResponse. */
+  | { type: 'go-to'; comment: Comment };
+
+export interface GoToResponse {
+  note: string | null;
+}
 
 /** Keyboard shortcuts (manifest "commands") handled by the overlay. */
 export type OverlayCommand = 'pick-element' | 'page-comment' | 'toggle-threads';

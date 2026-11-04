@@ -94,6 +94,7 @@ One-time, by hand:
      - `tabs`: find the tab of a comment's page, show the localhost notice
      - `storage`: remember overlay settings per site
      - `alarms`: reconnect to Claude Code when the browser wakes the extension
+     - `sidePanel`: show the review threads in the browser's side panel, next to the page
      - host access (all sites): `captureVisibleTab` screenshots need it; the
        overlay itself only runs on localhost
      - data use: collects nothing, sends nothing off the machine

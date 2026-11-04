@@ -3,6 +3,7 @@ import { render } from 'preact';
 import css from './styles.css';
 import { App } from './App.tsx';
 import { HOST_TAG } from './targets.ts';
+import { extensionAlive } from './bridge.ts';
 import { initCapture } from './capture.ts';
 import { Previews } from './previews.ts';
 
@@ -24,7 +25,32 @@ function mount(): void {
 
   document.documentElement.appendChild(host);
   initCapture(shadow);
-  render(<App previews={new Previews()} />, root);
+  const previews = new Previews();
+  render(<App previews={previews} />, root);
+
+  // Extension reloaded or updated: this copy can't reach it anymore. Take the
+  // overlay and the previews down (no dead buttons that throw), and say how to
+  // get it back. Browsers don't put the new version into open tabs by themselves.
+  const watch = setInterval(() => {
+    if (extensionAlive()) return;
+    clearInterval(watch);
+    render(null, root);
+    previews.destroy();
+    const note = document.createElement('div');
+    note.className = 'brm-ui brm-toast brm-reload-note';
+    note.setAttribute('role', 'status');
+    note.textContent = 'Browser Review was reloaded. Reload this page to use it again. ';
+    const button = document.createElement('button');
+    button.className = 'brm-btn brm-primary';
+    button.textContent = 'Reload page';
+    button.addEventListener('click', () => location.reload());
+    const close = document.createElement('button');
+    close.className = 'brm-btn';
+    close.textContent = 'Dismiss';
+    close.addEventListener('click', () => note.remove());
+    note.append(button, ' ', close);
+    root.append(note);
+  }, 1000);
 }
 
 mount();

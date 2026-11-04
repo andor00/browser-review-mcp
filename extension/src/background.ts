@@ -12,17 +12,21 @@ import {
   type ToExtension,
   type Viewport,
 } from '@brm/shared';
-import type {
-  CaptureResponse,
-  ContentRequest,
-  OverlayCommand,
-  PortEvent,
-  PrepareCaptureResponse,
-  ScreenshotDataResponse,
-  StatusResponse,
-  StoreOps,
-  StoreResponse,
-  TabRequest,
+import {
+  PANEL_FOCUS_KEY,
+  type CaptureResponse,
+  type ContentRequest,
+  type OverlayCommand,
+  type PanelRequest,
+  type PanelResponse,
+  type PanelState,
+  type PortEvent,
+  type PrepareCaptureResponse,
+  type ScreenshotDataResponse,
+  type StatusResponse,
+  type StoreOps,
+  type StoreResponse,
+  type TabRequest,
 } from './messages.ts';
 import { startDevReload } from './dev-reload.ts';
 import { isLocalUrl } from './local.ts';
@@ -180,10 +184,19 @@ function openHelp(section?: string): void {
 // ---------- requests from the overlay and extension pages ----------
 
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'brm') return;
+  const panelWindow = port.name.startsWith(PANEL_PORT) ? Number(port.name.slice(PANEL_PORT.length)) : null;
+  if (port.name !== 'brm' && panelWindow === null) return;
   ports.add(port);
   port.postMessage({ type: 'status', connected } satisfies PortEvent);
   port.onDisconnect.addListener(() => ports.delete(port));
+  if (panelWindow !== null) {
+    panelPorts.set(panelWindow, port);
+    void notifyPanelState(panelWindow);
+    port.onDisconnect.addListener(() => {
+      if (panelPorts.get(panelWindow) === port) panelPorts.delete(panelWindow);
+      void notifyPanelState(panelWindow);
+    });
+  }
   connect();
 });
 
@@ -223,8 +236,89 @@ chrome.runtime.onMessage.addListener((req: ContentRequest, sender, sendResponse)
     sendResponse({ claude: connected, mcpVersion, version: VERSION } satisfies StatusResponse);
     return false;
   }
+  const windowId = sender.tab?.windowId;
+  if (req.type === 'panel-state') {
+    sendResponse({ supported: PANEL_SUPPORTED, open: windowId !== undefined && panelPorts.has(windowId) } satisfies PanelState);
+    return false;
+  }
+  if (req.type === 'open-panel') {
+    if (!PANEL_SUPPORTED || windowId === undefined) {
+      sendResponse({ ok: false } satisfies PanelResponse);
+      return false;
+    }
+    // Open first: the browser only allows it while the click's user gesture lasts.
+    const opening = panelPorts.has(windowId) ? Promise.resolve(true) : openPanel(windowId);
+    if (req.focus !== undefined) focusThread(req.focus);
+    void opening.then((ok) => sendResponse({ ok } satisfies PanelResponse));
+    return true;
+  }
+  if (req.type === 'close-panel') {
+    if (windowId !== undefined) closePanel(windowId);
+    return false;
+  }
+  if (req.type === 'focus-thread') {
+    focusThread(req.id);
+    return false;
+  }
   return false;
 });
+
+// ---------- the threads side panel (Chrome sidePanel, Firefox sidebar) ----------
+
+/** Firefox's sidebar API (browser.sidebarAction; `chrome` is mapped to `browser` there). */
+interface SidebarAction {
+  open(): Promise<void>;
+  close(): Promise<void>;
+}
+const sidebarAction = (chrome as unknown as { sidebarAction?: SidebarAction }).sidebarAction;
+const PANEL_SUPPORTED = Boolean(sidebarAction ?? chrome.sidePanel?.open);
+/** The panel page connects with this port name plus its window id. */
+const PANEL_PORT = 'brm-panel:';
+/** Open panels, by window. */
+const panelPorts = new Map<number, chrome.runtime.Port>();
+
+/** Must be called right away in a user action handler (click on the icon, a shortcut). */
+function openPanel(windowId: number): Promise<boolean> {
+  try {
+    const p = sidebarAction ? sidebarAction.open() : chrome.sidePanel.open({ windowId });
+    return p.then(
+      () => true,
+      () => false,
+    );
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
+function closePanel(windowId: number): void {
+  // Firefox only closes it from a user action handler; the panel page then tries itself.
+  if (sidebarAction) void sidebarAction.close().catch(() => {});
+  void chrome.runtime.sendMessage({ type: 'panel-close', windowId } satisfies PanelRequest).catch(() => {});
+}
+
+/** Open or close; returns whether it is open afterwards. */
+function togglePanel(windowId: number): boolean {
+  if (panelPorts.has(windowId)) {
+    closePanel(windowId);
+    return false;
+  }
+  void openPanel(windowId);
+  return true;
+}
+
+function focusThread(id: number): void {
+  void chrome.storage.session.set({ [PANEL_FOCUS_KEY]: { id, at: Date.now() } });
+}
+
+/** Tells the overlays in the window whether the panel is open (the Threads button shows it). */
+async function notifyPanelState(windowId: number): Promise<void> {
+  const open = panelPorts.has(windowId);
+  for (const tab of await chrome.tabs.query({ windowId, url: LOCAL_TABS })) {
+    if (tab.id !== undefined) {
+      void chrome.tabs.sendMessage(tab.id, { type: 'panel-state', open } satisfies TabRequest).catch(() => {});
+    }
+  }
+}
 
 async function runStoreOp(op: keyof StoreOps, args: unknown): Promise<unknown> {
   const a = <K extends keyof StoreOps>(_k: K) => args as StoreOps[K]['args'];
@@ -368,10 +462,26 @@ async function sendToTab(tab: chrome.tabs.Tab | undefined, req: TabRequest): Pro
 
 const OVERLAY_COMMANDS: readonly string[] = ['pick-element', 'page-comment', 'toggle-threads'] satisfies OverlayCommand[];
 
-chrome.action.onClicked.addListener((tab) => void sendToTab(tab, { type: 'toggle' }));
+/**
+ * Extension icon / Alt+Shift+R: open the threads panel with the overlay, or
+ * close both. Without a side panel API the overlay shows its own sidebar.
+ */
+function toggleAll(tab: chrome.tabs.Tab | undefined): void {
+  if (!PANEL_SUPPORTED || tab?.windowId === undefined) {
+    void sendToTab(tab, { type: 'toggle' });
+    return;
+  }
+  const visible = togglePanel(tab.windowId);
+  void sendToTab(tab, { type: 'show', visible });
+}
+
+chrome.action.onClicked.addListener((tab) => toggleAll(tab));
 chrome.commands.onCommand.addListener((command, tab) => {
-  if (command === 'toggle-overlay') void sendToTab(tab, { type: 'toggle' });
-  else if (OVERLAY_COMMANDS.includes(command)) {
+  if (command === 'toggle-overlay') toggleAll(tab);
+  else if (command === 'toggle-threads' && PANEL_SUPPORTED && tab?.windowId !== undefined) {
+    if (tab.url && !isLocalUrl(tab.url) && !panelPorts.has(tab.windowId)) void showNotice(tab, 'not-localhost');
+    else togglePanel(tab.windowId);
+  } else if (OVERLAY_COMMANDS.includes(command)) {
     void sendToTab(tab, { type: 'command', command: command as OverlayCommand });
   }
 });

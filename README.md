@@ -97,7 +97,8 @@ To remove it: `claude mcp remove --scope user browser-review`.
 ## Use it
 
 1. Open your dev app, for example `http://localhost:5173`, and click the
-   extension icon. The review sidebar opens.
+   extension icon. The review sidebar opens in the browser's side panel, next to
+   the page: the page gets narrower, like with DevTools docked to the side.
 2. Leave comments, removals and edits.
 3. Open Claude Code in your **app's** project folder and say:
 
@@ -116,7 +117,7 @@ To remove it: `claude mcp remove --scope user browser-review`.
 
 | Action | How |
 |---|---|
-| Show the overlay with the Threads sidebar open (click again to hide) | the extension icon, or Alt+Shift+R |
+| Show the overlay with the Threads sidebar open (click again to hide) | the extension icon, or Alt+Shift+R. The sidebar is the browser's side panel (Firefox: its sidebar), so the page gets narrower instead of being covered |
 | Comment on an element | **Pick element** (Alt+Shift+P), click the element, write, **Add comment** |
 | Pick while holding a key | hold **Left Alt**, click the element; release Alt to stop. Change the key (or turn it off) on the help page. **Pick element** and its shortcut keep the picker on until you pick or press Esc |
 | Pick the parent element | mouse wheel up or arrow up while picking (down goes back) |
@@ -124,14 +125,18 @@ To remove it: `claude mcp remove --scope user browser-review`.
 | Edit text and CSS | pick it, **Edit** tab, change the texts, add CSS, **Save edit** |
 | See the new thread right after sending | tick **Open thread** in the comment box (remembered). Off: only the Threads count goes up |
 | Make the comment box taller | drag its bottom-right corner; the size is remembered |
-| Make the Threads sidebar wider or narrower | drag its left edge (double-click it for the default width); the width is remembered |
+| Make the Threads sidebar wider or narrower | drag its edge; the browser remembers the width |
 | Comment on the page | **Page comment** (Alt+Shift+C) |
-| See all threads | **Threads** (Alt+Shift+T): this page or the whole site, filtered by status |
+| See all threads | **Threads** (Alt+Shift+T): this page or the whole site. **Show** picks the status: not accepted yet (open, in progress and review ready together), one status, or all. Threads start expanded; **Collapse all** gives an overview (remembered), **Expand all** opens them again. The browser may refuse to open its side panel from the **Threads** button or a pin (it only allows that from its own controls); the toolbar then says to use the extension icon or Alt+Shift+T. Once open, pins and **Open thread** show their thread in it |
 | Jump to a thread's element | **Go to** in the thread. On another page it opens that page first. If the element is gone, you land on the page. **Open page** always opens the page itself. |
 | Help | **?** in the toolbar or the sidebar |
 | Change the shortcuts | they are browser shortcuts: help page, **Change shortcuts** (`brave://extensions/shortcuts`; Firefox: about:addons, gear, Manage Extension Shortcuts) |
 | Save a comment | Ctrl+Enter |
 | Cancel | Esc |
+
+After the extension is reloaded or updated, a page that was already open shows
+"Browser Review was reloaded" with a **Reload page** button: browsers don't put
+the new version into open tabs by themselves.
 
 What you type survives a reload of your app (dev server restart, full HMR reload,
 F5): an unsent comment, removal or edit reopens on the same element with your
@@ -222,6 +227,8 @@ Needs Node 26 (`nvm use` reads `.nvmrc`) and pnpm.
    save the extension reloads itself, then reloads your localhost tabs so they
    get the new overlay. What you were typing in a comment box comes back.
    Changes in `extension/static/` (manifest, help page) reload it too.
+   Reloading the extension by hand (the reload icon on its card) reloads the
+   localhost tabs as well.
 
 5. To also use the MCP server from this repo instead of npm (no publish needed),
    run the command `pnpm dev` printed, once, then restart Claude Code:
@@ -245,6 +252,8 @@ Good to know:
   comments, depends on its folder. So `extension/dist` has its own comments,
   apart from a release folder you loaded before.
 - **A build error** keeps the last good build running; fix it and save again.
+- **Changed `extension/build.ts`** (new entry point, new static file)? Restart
+  `pnpm dev`; the watch says so.
 - **Not reloading?** Check the watch is running and that port 4778 is free (it
   says so when it isn't). The extension's errors are under **Inspect views:
   service worker** on its card in `brave://extensions`.

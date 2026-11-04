@@ -31,7 +31,7 @@ for (const size of [16, 48, 128]) writeFileSync(join(dist, 'icons', `${size}.png
 
 /** The files in static/ that are copied as they are (the manifest per browser). */
 function copyStatic(): void {
-  for (const file of ['notice.html', 'help.html']) copyFileSync(join(root, 'static', file), join(dist, file));
+  for (const file of ['notice.html', 'help.html', 'panel.html']) copyFileSync(join(root, 'static', file), join(dist, file));
   copyFileSync(join(root, '..', 'LICENSE'), join(dist, 'LICENSE'));
   const manifest = JSON.parse(readFileSync(join(root, 'static', 'manifest.json'), 'utf8')) as Record<string, unknown>;
   writeFileSync(join(dist, 'manifest.json'), `${JSON.stringify(firefox ? firefoxManifest(manifest) : manifest, null, 2)}\n`);
@@ -44,6 +44,7 @@ const options: esbuild.BuildOptions = {
     'main-world': join(root, 'src', 'main-world.ts'),
     notice: join(root, 'src', 'notice.ts'),
     help: join(root, 'src', 'help.ts'),
+    panel: join(root, 'src', 'panel.tsx'),
   },
   outdir: dist,
   bundle: true,
@@ -80,6 +81,12 @@ if (watch) {
     }, 100);
   });
   const cli = join(root, '..', 'server', 'src', 'cli.ts');
+  // A running watch keeps the build options it started with.
+  for (const file of ['build.ts', 'zip.ts']) {
+    watchDir(join(root, file), () =>
+      console.warn(`\n${file} changed: stop this watch (Ctrl+C) and run pnpm dev again to use it.\n`),
+    );
+  }
   console.log(`
 Watching. Load ${dist} once (Load unpacked); after that the extension
 and your localhost tabs reload by themselves on every change.
@@ -160,13 +167,22 @@ function devReloadServer(): { plugin: esbuild.Plugin } {
 
 /**
  * Firefox runs MV3 backgrounds as event pages (background.scripts), not service
- * workers, and needs an add-on ID and a data collection statement for signing.
+ * workers, has a sidebar instead of the side panel, and needs an add-on ID and a
+ * data collection statement for signing.
  */
 function firefoxManifest(m: Record<string, unknown>): Record<string, unknown> {
-  const { minimum_chrome_version: _min, background: _bg, ...rest } = m;
+  const { minimum_chrome_version: _min, background: _bg, side_panel: panel, permissions, ...rest } = m;
   return {
     ...rest,
     background: { scripts: ['background.js'] },
+    // Firefox has a sidebar instead of Chrome's side panel, and no permission for it.
+    permissions: (permissions as string[]).filter((p) => p !== 'sidePanel'),
+    sidebar_action: {
+      default_panel: (panel as { default_path: string }).default_path,
+      default_title: 'Browser Review',
+      default_icon: { 16: 'icons/16.png', 48: 'icons/48.png' },
+      open_at_install: false,
+    },
     browser_specific_settings: {
       gecko: {
         id: GECKO_ID,

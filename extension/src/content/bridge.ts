@@ -3,6 +3,8 @@ import type { CreateCommentInput, Rect, ScreenshotUpload } from '@brm/shared';
 import type {
   CaptureResponse,
   ContentRequest,
+  PanelResponse,
+  PanelState,
   PortEvent,
   ScreenshotDataResponse,
   StoreOp,
@@ -12,8 +14,25 @@ import type {
 
 export class ApiError extends Error {}
 
+/**
+ * After the extension is reloaded or updated, this script is cut off from it and
+ * chrome.* calls throw right away ("Extension context invalidated").
+ */
+export function extensionAlive(): boolean {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+}
+
 function sendMessage<T>(req: ContentRequest): Promise<T> {
-  return chrome.runtime.sendMessage(req) as Promise<T>;
+  // Never throw synchronously: callers handle a rejected promise.
+  try {
+    return chrome.runtime.sendMessage(req) as Promise<T>;
+  } catch (err) {
+    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+  }
 }
 
 async function op<K extends StoreOp>(name: K, args: StoreOps[K]['args']): Promise<StoreOps[K]['result']> {
@@ -37,6 +56,16 @@ export const bridge = {
     await op('delete', { id });
   },
   openHelp: (section?: string) => void sendMessage({ type: 'open-help', section }).catch(() => {}),
+
+  /** Threads side panel. null: the extension was reloaded. */
+  panelState: () => sendMessage<PanelState>({ type: 'panel-state' }).catch(() => null),
+  /** false: the browser did not open it (it only does for some clicks). */
+  openPanel: (focus?: number) =>
+    sendMessage<PanelResponse>({ type: 'open-panel', focus })
+      .then((r) => r.ok)
+      .catch(() => false),
+  closePanel: () => void sendMessage({ type: 'close-panel' }).catch(() => {}),
+  focusThread: (id: number) => void sendMessage({ type: 'focus-thread', id }).catch(() => {}),
 
   async screenshot(id: number): Promise<string | null> {
     try {
@@ -62,13 +91,13 @@ export const bridge = {
   },
 
   /** Live events from the background. Reconnects when the service worker restarts. */
-  subscribe(onEvent: (ev: PortEvent) => void): () => void {
+  subscribe(onEvent: (ev: PortEvent) => void, name = 'brm'): () => void {
     let port: chrome.runtime.Port | null = null;
     let stopped = false;
     const open = () => {
       if (stopped) return;
       try {
-        port = chrome.runtime.connect({ name: 'brm' });
+        port = chrome.runtime.connect({ name });
       } catch {
         onEvent({ type: 'status', connected: false });
         return; // extension context is gone (extension reloaded)

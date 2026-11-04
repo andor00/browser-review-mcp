@@ -597,25 +597,29 @@ code {
 
 .brm-filters {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--brm-line);
-  flex-wrap: wrap;
 }
 
-.brm-chip {
-  height: 24px;
-  padding: 0 9px;
+.brm-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.brm-filter select {
+  height: 28px;
+  min-width: 0;
+  padding: 0 6px;
   border: 1px solid var(--brm-line);
-  border-radius: 12px;
+  border-radius: 6px;
   background: var(--brm-bg);
-  font-size: 12px;
-}
-
-.brm-chip.is-active {
-  border-color: var(--brm-accent);
-  background: var(--brm-accent-soft);
-  color: var(--brm-accent);
+  color: var(--brm-fg);
+  font: inherit;
 }
 
 .brm-side-list {
@@ -798,4 +802,47 @@ code {
 
 .brm-reply {
   margin-top: 4px;
+}
+
+/* Above the toolbar, when the browser would not open the side panel. */
+.brm-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 76px;
+  max-width: 340px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #1c1d21;
+  color: #fff;
+  font-size: 13px;
+  box-shadow: var(--brm-shadow);
+}
+
+/* The sidebar inside the browser's side panel (panel.html) fills it. */
+.brm-sidebar.is-docked {
+  position: static;
+  width: auto;
+  height: 100vh;
+  border-left: 0;
+  box-shadow: none;
+}
+
+.brm-panel-empty {
+  padding: 24px 18px;
+  color: var(--brm-dim);
+}
+
+.brm-panel-empty strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--brm-fg);
+  font-size: 14px;
+}
+
+.brm-reload-note {
+  bottom: 16px;
+}
+
+.brm-reload-note .brm-btn {
+  margin-top: 8px;
 }

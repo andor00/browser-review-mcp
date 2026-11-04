@@ -10,7 +10,8 @@ over MCP. See README.md for how it works and how to use it.
 shared/      types used by both sides, including the bridge protocol (BridgeCalls)
 server/      browser-review-mcp, published to npm: MCP over stdio + WebSocket bridge
 extension/   MV3 extension: background worker owns the data (store.ts over IndexedDB),
-             overlay (Preact in a Shadow DOM), help page, notice popup.
+             overlay (Preact in a Shadow DOM), threads side panel (panel.tsx;
+             Firefox: sidebar_action), help page, notice popup.
              build.ts makes dist/ (Chromium) and, with --firefox, dist-firefox/
 scripts/     version.ts: Conventional Commit checks and version bumps
 .githooks/   commit-msg and post-commit hooks (enabled by `pnpm install`)

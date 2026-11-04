@@ -2,15 +2,24 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { KIND_LABELS, STATUS_LABELS, type Comment, type Status } from '@brm/shared';
 import { bridge } from '../bridge.ts';
 import { describe } from '../targets.ts';
-import { expandedDraft, replyDraft } from '../drafts.ts';
+import { replyDraft } from '../drafts.ts';
 
-export type Filter = 'active' | 'review_ready' | 'accepted' | 'all';
+export type Filter = 'active' | Status | 'all';
 export type Scope = 'page' | 'site';
 
-const FILTERS: { key: Filter; label: string; statuses: Status[] }[] = [
-  { key: 'active', label: 'Active', statuses: ['open', 'in_progress', 'review_ready'] },
-  { key: 'review_ready', label: 'Review ready', statuses: ['review_ready'] },
-  { key: 'accepted', label: 'Accepted', statuses: ['accepted'] },
+const FILTERS: { key: Filter; label: string; hint?: string; statuses: Status[] }[] = [
+  {
+    key: 'active',
+    label: 'Not accepted yet',
+    hint: 'Open, in progress and review ready',
+    statuses: ['open', 'in_progress', 'review_ready'],
+  },
+  // One per status.
+  ...(['open', 'in_progress', 'review_ready', 'accepted'] as const).map((st) => ({
+    key: st,
+    label: STATUS_LABELS[st],
+    statuses: [st],
+  })),
   { key: 'all', label: 'All', statuses: ['open', 'in_progress', 'review_ready', 'accepted'] },
 ];
 
@@ -19,9 +28,13 @@ interface Props {
   path: string;
   connected: boolean;
   focusId: number | null;
+  /** In the browser's side panel: fills it, no resize handle (the browser resizes it). */
+  docked?: boolean;
   onClose: () => void;
   onHover: (id: number | null) => void;
-  onGoTo: (c: Comment) => string | null;
+  /** Resolves to a note to show, e.g. when the element is gone. */
+  onGoTo: (c: Comment) => string | null | Promise<string | null>;
+  onOpenPage: (c: Comment) => void;
   onChanged: () => Promise<void>;
 }
 
@@ -31,6 +44,44 @@ function time(iso: string): string {
   return sameDay
     ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+/** All threads collapsed (an overview) instead of all expanded. Remembered for all sites. */
+const COLLAPSED_KEY = 'threadsOverview';
+
+/**
+ * Which threads are open: all expanded by default, or all collapsed, plus the
+ * ones the user toggled by hand. New threads follow the current default.
+ */
+function useExpanded() {
+  const [collapsed, setCollapsed] = useState(false);
+  const [toggled, setToggled] = useState<ReadonlySet<number>>(new Set());
+  const collapsedRef = useRef(collapsed);
+  collapsedRef.current = collapsed;
+  useEffect(() => {
+    void chrome.storage.local.get(COLLAPSED_KEY).then((r) => setCollapsed(r[COLLAPSED_KEY] === true));
+  }, []);
+  // Toggled by hand means the opposite of the default.
+  const isOpen = (id: number) => collapsed === toggled.has(id);
+  const toggle = (id: number) =>
+    setToggled((t) => {
+      const next = new Set(t);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const show = (id: number) =>
+    setToggled((t) => {
+      const next = new Set(t);
+      if (collapsedRef.current) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  const setAll = (value: boolean) => {
+    setCollapsed(value);
+    setToggled(new Set());
+    void chrome.storage.local.set({ [COLLAPSED_KEY]: value });
+  };
+  return { collapsed, isOpen, toggle, show, setAll };
 }
 
 /** Width the user dragged the sidebar to, shared by all sites. */
@@ -98,19 +149,17 @@ function useSidebarWidth(ref: { current: HTMLElement | null }) {
 
 const ORDER: Record<Status, number> = { review_ready: 0, in_progress: 1, open: 2, accepted: 3 };
 
-export function Sidebar({ comments, path, connected, focusId, onClose, onHover, onGoTo, onChanged }: Props) {
+export function Sidebar({ comments, path, connected, focusId, docked, onClose, onHover, onGoTo, onOpenPage, onChanged }: Props) {
   const [scope, setScope] = useState<Scope>('page');
   const [filter, setFilter] = useState<Filter>('active');
-  const [expanded, setExpanded] = useState<number | null>(() => focusId ?? expandedDraft.get());
-
-  useEffect(() => expandedDraft.set(expanded), [expanded]);
+  const expanded = useExpanded();
   const asideRef = useRef<HTMLElement>(null);
   const size = useSidebarWidth(asideRef);
 
   useEffect(() => {
     if (focusId === null) return;
     const c = comments.find((x) => x.id === focusId);
-    setExpanded(focusId);
+    expanded.show(focusId);
     if (c && c.path !== path) setScope('site');
     if (c && !FILTERS.find((f) => f.key === filter)?.statuses.includes(c.status)) setFilter('all');
   }, [focusId]);
@@ -120,15 +169,23 @@ export function Sidebar({ comments, path, connected, focusId, onClose, onHover, 
   const shown = inScope
     .filter((c) => statuses.includes(c.status))
     .sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.updatedAt.localeCompare(a.updatedAt));
+  const anyOpen = shown.some((c) => expanded.isOpen(c.id));
 
   return (
-    <aside ref={asideRef} class="brm-ui brm-sidebar" style={{ width: `${size.width}px` }} aria-label="Review threads">
-      <div
-        class="brm-side-resize"
-        title="Drag to resize, double-click for the default width"
-        onPointerDown={size.onPointerDown}
-        onDblClick={size.reset}
-      />
+    <aside
+      ref={asideRef}
+      class={`brm-ui brm-sidebar ${docked ? 'is-docked' : ''}`}
+      style={docked ? undefined : { width: `${size.width}px` }}
+      aria-label="Review threads"
+    >
+      {!docked && (
+        <div
+          class="brm-side-resize"
+          title="Drag to resize, double-click for the default width"
+          onPointerDown={size.onPointerDown}
+          onDblClick={size.reset}
+        />
+      )}
       <header class="brm-side-head">
         <strong>Review</strong>
         <div class="brm-seg">
@@ -147,14 +204,25 @@ export function Sidebar({ comments, path, connected, focusId, onClose, onHover, 
         </button>
       </header>
       <nav class="brm-filters">
-        {FILTERS.map((f) => {
-          const n = inScope.filter((c) => f.statuses.includes(c.status)).length;
-          return (
-            <button key={f.key} class={`brm-chip ${filter === f.key ? 'is-active' : ''}`} onClick={() => setFilter(f.key)}>
-              {f.label} <span class="brm-dim">{n}</span>
-            </button>
-          );
-        })}
+        <label class="brm-filter">
+          <span class="brm-dim">Show</span>
+          <select value={filter} onChange={(e) => setFilter((e.target as HTMLSelectElement).value as Filter)}>
+            {FILTERS.map((f) => (
+              <option key={f.key} value={f.key} title={f.hint}>
+                {f.label} ({inScope.filter((c) => f.statuses.includes(c.status)).length})
+              </option>
+            ))}
+          </select>
+        </label>
+        {shown.length > 0 && (
+          <button
+            class="brm-btn"
+            onClick={() => expanded.setAll(anyOpen)}
+            title={anyOpen ? 'Collapse every thread for an overview' : 'Expand every thread'}
+          >
+            {anyOpen ? 'Collapse all' : 'Expand all'}
+          </button>
+        )}
       </nav>
       {!connected && (
         <p class="brm-warn">
@@ -179,10 +247,12 @@ export function Sidebar({ comments, path, connected, focusId, onClose, onHover, 
             comment={c}
             showPath={scope === 'site'}
             onThisPage={c.path === path}
-            open={expanded === c.id}
-            onToggle={() => setExpanded(expanded === c.id ? null : c.id)}
+            open={expanded.isOpen(c.id)}
+            focused={focusId === c.id}
+            onToggle={() => expanded.toggle(c.id)}
             onHover={onHover}
             onGoTo={onGoTo}
+            onOpenPage={onOpenPage}
             onChanged={onChanged}
           />
         ))}
@@ -196,13 +266,16 @@ interface CardProps {
   showPath: boolean;
   onThisPage: boolean;
   open: boolean;
+  /** Asked for (a pin, "Open thread"): scroll it into view. */
+  focused: boolean;
   onToggle: () => void;
   onHover: (id: number | null) => void;
-  onGoTo: (c: Comment) => string | null;
+  onGoTo: Props['onGoTo'];
+  onOpenPage: Props['onOpenPage'];
   onChanged: () => Promise<void>;
 }
 
-function Card({ comment: c, showPath, onThisPage, open, onToggle, onHover, onGoTo, onChanged }: CardProps) {
+function Card({ comment: c, showPath, onThisPage, open, focused, onToggle, onHover, onGoTo, onOpenPage, onChanged }: CardProps) {
   const [reply, setReply] = useState(() => replyDraft.get(c.id));
 
   useEffect(() => replyDraft.set(c.id, reply), [c.id, reply]);
@@ -213,8 +286,8 @@ function Card({ comment: c, showPath, onThisPage, open, onToggle, onHover, onGoT
   const first = c.messages.find((m) => m.author === 'user');
 
   useEffect(() => {
-    if (open) ref.current?.scrollIntoView({ block: 'nearest' });
-  }, [open]);
+    if (focused) ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [focused]);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -307,7 +380,7 @@ function Card({ comment: c, showPath, onThisPage, open, onToggle, onHover, onGoT
           <div class="brm-actions brm-wrap">
             <button
               class="brm-btn"
-              onClick={() => setNote(onGoTo(c))}
+              onClick={() => void Promise.resolve(onGoTo(c)).then(setNote)}
               title={
                 onThisPage
                   ? c.target
@@ -318,7 +391,15 @@ function Card({ comment: c, showPath, onThisPage, open, onToggle, onHover, onGoT
             >
               Go to
             </button>
-            <a class="brm-btn" href={c.url} title={c.url}>
+            <a
+              class="brm-btn"
+              href={c.url}
+              title={c.url}
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenPage(c);
+              }}
+            >
               Open page
             </a>
             {canUndo && (

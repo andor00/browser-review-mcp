@@ -44,9 +44,3 @@ export const replyDraft = {
   get: (id: number) => read<string>(`reply:${id}`) ?? '',
   set: (id: number, text: string) => write(`reply:${id}`, text ? text : null),
 };
-
-/** The expanded thread in the sidebar. */
-export const expandedDraft = {
-  get: () => read<number>('expanded'),
-  set: (id: number | null) => write('expanded', id),
-};

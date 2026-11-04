@@ -3,23 +3,25 @@
 // background.ts is dead code and esbuild leaves this module out.
 //
 // The background long-polls the build id. When a new build is out it reloads
-// the extension (new background, content scripts, pages), and the new
-// background reloads the localhost tabs, whose old content scripts are cut off
-// by the reload. What was being typed in the overlay survives (drafts).
+// the extension (new background, content scripts, pages). Every fresh start of
+// the extension (this reload, the reload icon on its card, a browser restart)
+// reloads the localhost tabs, whose old content scripts are cut off by the
+// reload. What was being typed in the overlay survives (drafts).
 
-const BASELINE_KEY = 'devReloadBuild'; // storage.session: build this extension was loaded at
-const RELOAD_TABS_KEY = 'devReloadTabs'; // storage.local: reload the tabs after our own reload
+// storage.session is emptied by a reload of the extension and survives the service worker sleeping.
+const BASELINE_KEY = 'devReloadBuild'; // build this extension was loaded at
+const STARTED_KEY = 'devReloadStarted'; // the tabs were reloaded after this start
 
 /** `url`: the build server's /build. `tabs`: match patterns of the tabs to reload. */
 export function startDevReload(url: string, tabs: string[]): void {
   void (async () => {
-    const { [RELOAD_TABS_KEY]: reloadTabs } = await chrome.storage.local.get(RELOAD_TABS_KEY);
-    if (reloadTabs) {
-      await chrome.storage.local.remove(RELOAD_TABS_KEY);
+    // A fresh start of the extension: the tabs still run the old content scripts.
+    const stored = await chrome.storage.session.get([BASELINE_KEY, STARTED_KEY]);
+    let baseline = stored[BASELINE_KEY] as string | undefined;
+    if (!stored[STARTED_KEY]) {
+      await chrome.storage.session.set({ [STARTED_KEY]: true });
       for (const tab of await chrome.tabs.query({ url: tabs })) if (tab.id !== undefined) void chrome.tabs.reload(tab.id);
     }
-    // storage.session is emptied by a reload, and survives the service worker sleeping.
-    let { [BASELINE_KEY]: baseline } = (await chrome.storage.session.get(BASELINE_KEY)) as { [BASELINE_KEY]?: string };
     for (;;) {
       // An extension API call keeps the service worker awake while we wait.
       await chrome.runtime.getPlatformInfo();
@@ -36,7 +38,6 @@ export function startDevReload(url: string, tabs: string[]): void {
         await chrome.storage.session.set({ [BASELINE_KEY]: id });
       } else if (id !== baseline) {
         console.log('Browser Review: new build, reloading');
-        await chrome.storage.local.set({ [RELOAD_TABS_KEY]: true });
         chrome.runtime.reload();
         return;
       }

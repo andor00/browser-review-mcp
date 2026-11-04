@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { isPreviewActive, pageKey, type Comment, type Kind } from '@brm/shared';
-import type { PrepareCaptureResponse, TabRequest } from '../messages.ts';
+import type { GoToResponse, PanelState, PrepareCaptureResponse, TabRequest } from '../messages.ts';
 import { bridge } from './bridge.ts';
 import { enterCapture, nextFrames } from './capture.ts';
 import { useHref } from './hooks.ts';
@@ -37,6 +37,11 @@ export function App({ previews }: { previews: Previews }) {
   const [focusId, setFocusId] = useState<number | null>(null);
   const [hoverId, setHoverId] = useState<number | null>(null);
   const [flashId, setFlashId] = useState<number | null>(null);
+  /** The browser's side panel shows the threads; null until known. */
+  const [panel, setPanel] = useState<PanelState | null>(null);
+  const usePanel = panel?.supported === true;
+  /** Shown above the toolbar when the browser would not open the panel from a click in the page. */
+  const [hint, setHint] = useState<string | null>(null);
 
   // ---------- data ----------
 
@@ -65,6 +70,10 @@ export function App({ previews }: { previews: Previews }) {
   useEffect(() => {
     previews.setComments(pageComments.filter(isPreviewActive));
   }, [pageComments, previews]);
+
+  useEffect(() => {
+    void bridge.panelState().then((p) => p && setPanel(p));
+  }, []);
 
   // ---------- show / hide, per site ----------
 
@@ -134,6 +143,23 @@ export function App({ previews }: { previews: Previews }) {
         finish();
         return false;
       }
+      if (req.type === 'show') {
+        setHiddenStored(!req.visible);
+        return false;
+      }
+      if (req.type === 'panel-state') {
+        setPanel({ supported: true, open: req.open });
+        if (req.open) setHint(null);
+        return false;
+      }
+      if (req.type === 'hover') {
+        setHoverId(req.id);
+        return false;
+      }
+      if (req.type === 'go-to') {
+        sendResponse({ note: goToRef.current(req.comment) } satisfies GoToResponse);
+        return false;
+      }
       if (req.type === 'prepare-capture') {
         void (async (): Promise<PrepareCaptureResponse> => {
           finish();
@@ -179,23 +205,30 @@ export function App({ previews }: { previews: Previews }) {
     return () => chrome.storage.onChanged.removeListener(onChange);
   }, []);
 
+  // Where the mouse is, so a picker started from the keyboard highlights at once.
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      pointer.current = { x: e.clientX, y: e.clientY };
+    };
+    addEventListener('mousemove', onMove, { capture: true, passive: true });
+    return () => removeEventListener('mousemove', onMove, { capture: true });
+  }, []);
+
   useEffect(() => {
     if (holdKey === 'off') return;
-    let timer = 0;
     const isHeld = () => modeRef.current.type === 'picking' && modeRef.current.held === true;
     const stop = () => {
-      clearTimeout(timer);
       if (isHeld()) setMode({ type: 'idle' });
     };
     const onDown = (e: KeyboardEvent) => {
       if (e.code === holdKey) {
         if (e.repeat || hiddenRef.current || modeRef.current.type !== 'idle') return;
-        // Wait a moment: Alt+Shift+P and other combos press it too, and should not flash the picker.
-        timer = window.setTimeout(() => setMode({ type: 'picking', held: true }), 150);
+        setMode({ type: 'picking', held: true });
         return;
       }
-      // Another key while holding it: a key combination, not a hold. The picker's own keys still work.
-      clearTimeout(timer);
+      // Another key while holding it: a key combination (Alt+Shift+P, Alt+Tab), not
+      // a hold, so stop again. The picker's own keys still work.
       if (isHeld() && !['ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(e.key)) setMode({ type: 'idle' });
     };
     const onUp = (e: KeyboardEvent) => {
@@ -211,7 +244,6 @@ export function App({ previews }: { previews: Previews }) {
     addEventListener('keyup', onUp, opts);
     addEventListener('blur', onBlur);
     return () => {
-      clearTimeout(timer);
       removeEventListener('keydown', onDown, opts);
       removeEventListener('keyup', onUp, opts);
       removeEventListener('blur', onBlur);
@@ -220,11 +252,33 @@ export function App({ previews }: { previews: Previews }) {
 
   // ---------- actions ----------
 
+  const showHint = () => {
+    setHint('Your browser only opens the side panel from the extension icon or Alt+Shift+T. Use one of those.');
+    setTimeout(() => setHint(null), 6000);
+  };
+
+  const openPanel = (focus?: number) => {
+    void bridge.openPanel(focus).then((ok) => {
+      if (!ok) showHint();
+    });
+  };
+
   const openThread = (id: number) => {
+    if (usePanel) {
+      if (panel?.open) bridge.focusThread(id);
+      else openPanel(id);
+      return;
+    }
     setFocusId(null);
     setSidebarStored(true);
     // set after a tick so the same id can be focused twice
     setTimeout(() => setFocusId(id), 0);
+  };
+
+  const toggleThreads = () => {
+    if (!usePanel) setSidebarStored(!sidebarOpen);
+    else if (panel?.open) bridge.closePanel();
+    else openPanel();
   };
 
   /**
@@ -256,6 +310,8 @@ export function App({ previews }: { previews: Previews }) {
     },
     [path],
   );
+  const goToRef = useRef(goTo);
+  goToRef.current = goTo;
 
   // Reopen the popover with what was being typed before the app reloaded.
   // The app may still be rendering, so look for the element for a few seconds.
@@ -298,7 +354,8 @@ export function App({ previews }: { previews: Previews }) {
     if (!c) return;
     sessionStorage.removeItem(GOTO_KEY);
     setHiddenStored(false);
-    openThread(id);
+    if (usePanel) bridge.focusThread(id);
+    else openThread(id);
     let tries = 0;
     const attempt = () => {
       const visible = c.target ? findTarget(c.target)?.getClientRects().length : 0;
@@ -326,7 +383,7 @@ export function App({ previews }: { previews: Previews }) {
   return (
     <>
       {/* Sidebar first: popovers, pins and the picker render on top of it. */}
-      {sidebarOpen && (
+      {!usePanel && panel !== null && sidebarOpen && (
         <Sidebar
           comments={comments}
           path={path}
@@ -335,6 +392,7 @@ export function App({ previews }: { previews: Previews }) {
           onClose={() => setSidebarStored(false)}
           onHover={setHoverId}
           onGoTo={goTo}
+          onOpenPage={(c) => (location.href = c.url)}
           onChanged={load}
         />
       )}
@@ -345,6 +403,7 @@ export function App({ previews }: { previews: Previews }) {
       {mode.type === 'picking' && (
         <Picker
           releaseKey={mode.held && holdKey !== 'off' ? HOLD_KEYS[holdKey] : null}
+          start={pointer.current}
           onPick={(el) => setMode({ type: 'compose', el, kind: 'comment' })}
           onCancel={() => setMode({ type: 'idle' })}
         />
@@ -362,15 +421,20 @@ export function App({ previews }: { previews: Previews }) {
         />
       )}
 
+      {hint && (
+        <div class="brm-ui brm-toast" role="status">
+          {hint}
+        </div>
+      )}
       <Toolbar
         connected={connected}
         picking={mode.type === 'picking'}
         openCount={openCount}
         reviewCount={reviewCount}
-        sidebarOpen={sidebarOpen}
+        sidebarOpen={usePanel ? panel.open : sidebarOpen}
         onPick={() => setMode(mode.type === 'picking' && !mode.held ? { type: 'idle' } : { type: 'picking' })}
         onPageComment={() => setMode({ type: 'compose', el: null, kind: 'comment' })}
-        onToggleSidebar={() => setSidebarStored(!sidebarOpen)}
+        onToggleSidebar={toggleThreads}
         onHide={() => setHiddenStored(true)}
         onHelp={() => bridge.openHelp()}
       />

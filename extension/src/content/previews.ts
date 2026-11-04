@@ -86,6 +86,13 @@ export class Previews {
     this.apply();
   }
 
+  /** Undo every preview and stop watching the page (the extension was reloaded). */
+  destroy(): void {
+    this.#observer.disconnect();
+    this.#suspended = true;
+    this.apply();
+  }
+
   #schedule(): void {
     if (this.#scheduled) return;
     this.#scheduled = true;
