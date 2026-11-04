@@ -13,6 +13,7 @@ extension/   MV3 extension: background worker owns the data (store.ts over Index
              overlay (Preact in a Shadow DOM), threads side panel (panel.tsx;
              Firefox: sidebar_action), help page, notice popup.
              build.ts makes dist/ (Chromium) and, with --firefox, dist-firefox/
+demo/        Vite + React demo app with flaws on purpose (`pnpm demo`); not released
 scripts/     version.ts: Conventional Commit checks and version bumps
 .githooks/   commit-msg and post-commit hooks (enabled by `pnpm install`)
 ```
@@ -25,6 +26,7 @@ the first holds the port (hub), the rest connect to it (/peer).
 ```sh
 pnpm build           # extension/dist, extension/dist-firefox, server/dist/cli.js
 pnpm dev             # watch + hot reload of extension/dist (dev:firefox: dist-firefox)
+pnpm demo            # demo app on http://localhost:5173 to try it on
 pnpm test            # all tests
 pnpm typecheck       # all packages
 pnpm package         # release/browser-review-<version>-chrome.zip and -firefox.zip

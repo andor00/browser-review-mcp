@@ -113,6 +113,20 @@ To remove it: `claude mcp remove --scope user browser-review`.
    http://localhost:5173 only."*
 4. In the sidebar, **Accept solution** or write what is still wrong and **Reopen**.
 
+### Try it on the demo app
+
+No app of your own at hand, or want to show it to someone? The repo has a small
+made-up product site (Vite + React) with a few flaws on purpose: a banner to
+remove, a typo, a button that hardly stands out, a misaligned icon.
+
+```sh
+pnpm install
+pnpm demo        # http://localhost:5173
+```
+
+Review it, then ask Claude Code "fix the review comments" in this repo. The list
+of flaws is in [demo/README.md](demo/README.md); `git checkout demo/` resets it.
+
 ### The overlay
 
 | Action | How |
