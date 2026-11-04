@@ -330,6 +330,13 @@ docs/        plan
 
 `BRM_PORT` changes the bridge port (default 4777), but the extension expects 4777.
 
+## Sponsor
+
+<a href="https://stabiloworld.com/"><img src="docs/sponsors/stabilo-international.png" alt="Stabilo International B.V." width="300"></a>
+
+Browser Review was made possible by [Stabilo International B.V.](https://stabiloworld.com/),
+which needed a tool like this and supported its development. Thank you!
+
 ## License
 
 [MIT](LICENSE): free for everyone to use, change and share, also commercially.
