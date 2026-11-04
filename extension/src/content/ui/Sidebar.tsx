@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { KIND_LABELS, STATUS_LABELS, type Comment, type Status } from '@brm/shared';
 import { bridge } from '../bridge.ts';
 import { describe } from '../targets.ts';
+import { expandedDraft, replyDraft } from '../drafts.ts';
 
 export type Filter = 'active' | 'review_ready' | 'accepted' | 'all';
 export type Scope = 'page' | 'site';
@@ -20,7 +21,7 @@ interface Props {
   focusId: number | null;
   onClose: () => void;
   onHover: (id: number | null) => void;
-  onShow: (c: Comment) => void;
+  onGoTo: (c: Comment) => string | null;
   onChanged: () => Promise<void>;
 }
 
@@ -34,10 +35,12 @@ function time(iso: string): string {
 
 const ORDER: Record<Status, number> = { review_ready: 0, in_progress: 1, open: 2, accepted: 3 };
 
-export function Sidebar({ comments, path, connected, focusId, onClose, onHover, onShow, onChanged }: Props) {
+export function Sidebar({ comments, path, connected, focusId, onClose, onHover, onGoTo, onChanged }: Props) {
   const [scope, setScope] = useState<Scope>('page');
   const [filter, setFilter] = useState<Filter>('active');
-  const [expanded, setExpanded] = useState<number | null>(focusId);
+  const [expanded, setExpanded] = useState<number | null>(() => focusId ?? expandedDraft.get());
+
+  useEffect(() => expandedDraft.set(expanded), [expanded]);
 
   useEffect(() => {
     if (focusId === null) return;
@@ -65,7 +68,7 @@ export function Sidebar({ comments, path, connected, focusId, onClose, onHover, 
             Whole site
           </button>
         </div>
-        <button class="brm-icon-btn" title="Close" onClick={onClose}>
+        <button class="brm-icon-btn" title="Close (Alt+Shift+T)" onClick={onClose}>
           ✕
         </button>
       </header>
@@ -96,7 +99,7 @@ export function Sidebar({ comments, path, connected, focusId, onClose, onHover, 
             open={expanded === c.id}
             onToggle={() => setExpanded(expanded === c.id ? null : c.id)}
             onHover={onHover}
-            onShow={onShow}
+            onGoTo={onGoTo}
             onChanged={onChanged}
           />
         ))}
@@ -112,14 +115,17 @@ interface CardProps {
   open: boolean;
   onToggle: () => void;
   onHover: (id: number | null) => void;
-  onShow: (c: Comment) => void;
+  onGoTo: (c: Comment) => string | null;
   onChanged: () => Promise<void>;
 }
 
-function Card({ comment: c, showPath, onThisPage, open, onToggle, onHover, onShow, onChanged }: CardProps) {
-  const [reply, setReply] = useState('');
+function Card({ comment: c, showPath, onThisPage, open, onToggle, onHover, onGoTo, onChanged }: CardProps) {
+  const [reply, setReply] = useState(() => replyDraft.get(c.id));
+
+  useEffect(() => replyDraft.set(c.id, reply), [c.id, reply]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const ref = useRef<HTMLElement>(null);
   const first = c.messages.find((m) => m.author === 'user');
 
@@ -214,17 +220,24 @@ function Card({ comment: c, showPath, onThisPage, open, onToggle, onHover, onSho
             onInput={(e) => setReply((e.target as HTMLTextAreaElement).value)}
           />
           {error && <p class="brm-error">{error}</p>}
+          {note && <p class="brm-note">{note}</p>}
           <div class="brm-actions brm-wrap">
-            {c.target && onThisPage && c.kind !== 'remove' && (
-              <button class="brm-btn" onClick={() => onShow(c)}>
-                Show on page
-              </button>
-            )}
-            {!onThisPage && (
-              <a class="brm-btn" href={c.url}>
-                Open page
-              </a>
-            )}
+            <button
+              class="brm-btn"
+              onClick={() => setNote(onGoTo(c))}
+              title={
+                onThisPage
+                  ? c.target
+                    ? 'Scroll to the element'
+                    : 'Scroll to the top of the page'
+                  : 'Go to the page and show the element'
+              }
+            >
+              Go to
+            </button>
+            <a class="brm-btn" href={c.url} title={c.url}>
+              Open page
+            </a>
             {canUndo && (
               <button
                 class="brm-btn"

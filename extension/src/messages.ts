@@ -26,8 +26,12 @@ export type PortEvent =
 /** Background -> content script (chrome.tabs.sendMessage). */
 export type TabRequest =
   | { type: 'toggle' }
+  | { type: 'command'; command: OverlayCommand }
   | { type: 'prepare-capture'; comment: Comment }
   | { type: 'capture-done' };
+
+/** Keyboard shortcuts (manifest "commands") handled by the overlay. */
+export type OverlayCommand = 'pick-element' | 'page-comment' | 'toggle-threads';
 
 export interface PrepareCaptureResponse {
   rect: Rect | null;

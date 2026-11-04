@@ -162,8 +162,9 @@ code {
   bottom: 16px;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 4px 4px 10px;
+  gap: 4px;
+  padding: 6px 6px 6px 14px;
+  font-size: 14px;
   background: var(--brm-bg);
   border: 1px solid var(--brm-line);
   border-radius: 10px;
@@ -173,17 +174,18 @@ code {
 .brm-tool {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 10px;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
+  font-weight: 500;
   background: transparent;
 }
 
 .brm-tool svg {
-  width: 14px;
-  height: 14px;
+  width: 17px;
+  height: 17px;
   fill: currentColor;
 }
 
@@ -213,8 +215,8 @@ code {
 }
 
 .brm-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   margin-right: 4px;
   flex: none;
@@ -226,6 +228,20 @@ code {
 
 .brm-dot.is-off {
   background: #a0a3ab;
+}
+
+.brm-toolbar .brm-icon-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+}
+
+.brm-toolbar .brm-count {
+  min-width: 20px;
+  height: 20px;
+  line-height: 20px;
+  border-radius: 10px;
+  font-size: 12px;
 }
 
 /* ---------- picker ---------- */
@@ -406,6 +422,14 @@ code {
 
 .brm-help {
   margin: 0 0 4px;
+  color: var(--brm-dim);
+}
+
+.brm-note {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--brm-soft);
   color: var(--brm-dim);
 }
 

@@ -4,6 +4,7 @@ import type { PrepareCaptureResponse, TabRequest } from '../messages.ts';
 import { bridge } from './bridge.ts';
 import { enterCapture, nextFrames } from './capture.ts';
 import { useHref } from './hooks.ts';
+import { composerDraft, type ComposerDraft } from './drafts.ts';
 import type { Previews } from './previews.ts';
 import { findTarget } from './targets.ts';
 import { Composer } from './ui/Composer.tsx';
@@ -12,9 +13,15 @@ import { Outline, Pins } from './ui/Pins.tsx';
 import { Sidebar } from './ui/Sidebar.tsx';
 import { Toolbar } from './ui/Toolbar.tsx';
 
-type Mode = { type: 'idle' } | { type: 'picking' } | { type: 'compose'; el: Element | null; kind: Kind };
+type Mode =
+  | { type: 'idle' }
+  | { type: 'picking' }
+  | { type: 'compose'; el: Element | null; kind: Kind; draft?: ComposerDraft; notice?: string };
 
 const hiddenKey = (origin: string) => `hidden:${origin}`;
+/** sessionStorage key: comment to jump to after "Go to" navigated to its page. */
+const GOTO_KEY = 'brm-goto';
+const sidebarKey = (origin: string) => `sidebar:${origin}`;
 
 export function App({ previews }: { previews: Previews }) {
   const href = useHref();
@@ -62,8 +69,19 @@ export function App({ previews }: { previews: Previews }) {
   // ---------- show / hide, per site ----------
 
   useEffect(() => {
-    void chrome.storage.local.get(hiddenKey(origin)).then((r) => setHidden(r[hiddenKey(origin)] === true));
+    void chrome.storage.local.get([hiddenKey(origin), sidebarKey(origin)]).then((r) => {
+      setHidden(r[hiddenKey(origin)] === true);
+      setSidebarOpen(r[sidebarKey(origin)] === true);
+    });
   }, [origin]);
+
+  const setSidebarStored = useCallback(
+    (value: boolean) => {
+      setSidebarOpen(value);
+      void chrome.storage.local.set({ [sidebarKey(origin)]: value });
+    },
+    [origin],
+  );
 
   const setHiddenStored = useCallback(
     (value: boolean) => {
@@ -78,6 +96,8 @@ export function App({ previews }: { previews: Previews }) {
 
   const hiddenRef = useRef(hidden);
   hiddenRef.current = hidden;
+  const sidebarOpenRef = useRef(sidebarOpen);
+  sidebarOpenRef.current = sidebarOpen;
   const exitCapture = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -88,7 +108,26 @@ export function App({ previews }: { previews: Previews }) {
     };
     const onMessage = (req: TabRequest, _sender: chrome.runtime.MessageSender, sendResponse: (r: unknown) => void) => {
       if (req.type === 'toggle') {
-        setHiddenStored(!hiddenRef.current);
+        // Extension icon / Alt+Shift+R: show the overlay with the sidebar open.
+        // When the sidebar is already showing, hide everything.
+        if (hiddenRef.current || !sidebarOpenRef.current) {
+          setHiddenStored(false);
+          setSidebarStored(true);
+        } else {
+          setHiddenStored(true);
+        }
+        return false;
+      }
+      if (req.type === 'command') {
+        // Shortcuts also bring the overlay back when it is hidden.
+        if (hiddenRef.current) setHiddenStored(false);
+        if (req.command === 'pick-element') {
+          setMode((m) => (m.type === 'picking' ? { type: 'idle' } : { type: 'picking' }));
+        } else if (req.command === 'page-comment') {
+          setMode({ type: 'compose', el: null, kind: 'comment' });
+        } else {
+          setSidebarStored(hiddenRef.current ? true : !sidebarOpenRef.current);
+        }
         return false;
       }
       if (req.type === 'capture-done') {
@@ -124,25 +163,97 @@ export function App({ previews }: { previews: Previews }) {
     };
     chrome.runtime.onMessage.addListener(onMessage);
     return () => chrome.runtime.onMessage.removeListener(onMessage);
-  }, [previews, setHiddenStored]);
+  }, [previews, setHiddenStored, setSidebarStored]);
 
   // ---------- actions ----------
 
   const openThread = (id: number) => {
     setFocusId(null);
-    setSidebarOpen(true);
+    setSidebarStored(true);
     // set after a tick so the same id can be focused twice
     setTimeout(() => setFocusId(id), 0);
   };
 
-  const show = (c: Comment) => {
-    if (!c.target) return;
-    const el = findTarget(c.target);
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setFlashId(c.id);
-    setTimeout(() => setFlashId((f) => (f === c.id ? null : f)), 1600);
-  };
+  /**
+   * "Go to": on another page, navigate there (the element is shown after the load).
+   * On this page, scroll to the element. When it is gone, the page itself is the
+   * best we can do, so scroll to the top and say why. Returns that note.
+   */
+  const goTo = useCallback(
+    (c: Comment): string | null => {
+      if (c.path !== path) {
+        sessionStorage.setItem(GOTO_KEY, String(c.id));
+        location.href = c.url;
+        return null;
+      }
+      if (!c.target) {
+        scrollTo({ top: 0, behavior: 'smooth' });
+        return null;
+      }
+      const el = findTarget(c.target);
+      if (!el || el.getClientRects().length === 0) {
+        scrollTo({ top: 0, behavior: 'smooth' });
+        if (el && c.kind === 'remove') return 'The element is hidden by this removal.';
+        return 'The element is not on the page anymore.';
+      }
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFlashId(c.id);
+      setTimeout(() => setFlashId((f) => (f === c.id ? null : f)), 1600);
+      return null;
+    },
+    [path],
+  );
+
+  // Reopen the popover with what was being typed before the app reloaded.
+  // The app may still be rendering, so look for the element for a few seconds.
+  useEffect(() => {
+    const draft = composerDraft.get();
+    if (!draft || draft.path !== path) return;
+    if (!draft.target) {
+      setMode({ type: 'compose', el: null, kind: 'comment', draft });
+      return;
+    }
+    const target = draft.target;
+    let tries = 0;
+    let timer = 0;
+    const attempt = () => {
+      const el = findTarget(target);
+      if (el) {
+        setMode({ type: 'compose', el, kind: draft.kind, draft });
+      } else if (tries++ < 15) {
+        timer = window.setTimeout(attempt, 200);
+      } else {
+        setMode({
+          type: 'compose',
+          el: null,
+          kind: 'comment',
+          draft: { ...draft, kind: 'comment' },
+          notice: `The element you picked (${target.tag}) is not on the page anymore, so this is now a page comment.`,
+        });
+      }
+    };
+    attempt();
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Finish a "Go to" from another page: open the thread and show the element.
+  // The app may still be rendering, so try for a moment before giving up.
+  useEffect(() => {
+    const id = Number(sessionStorage.getItem(GOTO_KEY));
+    if (!id) return;
+    const c = comments.find((x) => x.id === id);
+    if (!c) return;
+    sessionStorage.removeItem(GOTO_KEY);
+    setHiddenStored(false);
+    openThread(id);
+    let tries = 0;
+    const attempt = () => {
+      const visible = c.target ? findTarget(c.target)?.getClientRects().length : 0;
+      if (visible || tries++ >= 10) goTo(c);
+      else setTimeout(attempt, 200);
+    };
+    attempt();
+  }, [comments]);
 
   const onCreated = async (c: Comment) => {
     await load();
@@ -166,9 +277,9 @@ export function App({ previews }: { previews: Previews }) {
           path={path}
           connected={connected}
           focusId={focusId}
-          onClose={() => setSidebarOpen(false)}
+          onClose={() => setSidebarStored(false)}
           onHover={setHoverId}
-          onShow={show}
+          onGoTo={goTo}
           onChanged={load}
         />
       )}
@@ -187,6 +298,8 @@ export function App({ previews }: { previews: Previews }) {
           key={mode.el ? 'el' : 'page'}
           el={mode.el}
           initialKind={mode.kind}
+          draft={mode.draft}
+          notice={mode.notice}
           previews={previews}
           onCreated={onCreated}
           onCancel={() => setMode({ type: 'idle' })}
@@ -201,7 +314,7 @@ export function App({ previews }: { previews: Previews }) {
         sidebarOpen={sidebarOpen}
         onPick={() => setMode(mode.type === 'picking' ? { type: 'idle' } : { type: 'picking' })}
         onPageComment={() => setMode({ type: 'compose', el: null, kind: 'comment' })}
-        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        onToggleSidebar={() => setSidebarStored(!sidebarOpen)}
         onHide={() => setHiddenStored(true)}
       />
     </>

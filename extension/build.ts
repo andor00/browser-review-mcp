@@ -11,7 +11,7 @@ const watch = process.argv.includes('--watch');
 
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(join(dist, 'icons'), { recursive: true });
-copyFileSync(join(root, 'static', 'manifest.json'), join(dist, 'manifest.json'));
+for (const file of ['manifest.json', 'notice.html']) copyFileSync(join(root, 'static', file), join(dist, file));
 for (const size of [16, 48, 128]) writeFileSync(join(dist, 'icons', `${size}.png`), icon(size));
 
 const options: esbuild.BuildOptions = {
@@ -19,6 +19,7 @@ const options: esbuild.BuildOptions = {
     background: join(root, 'src', 'background.ts'),
     content: join(root, 'src', 'content', 'index.tsx'),
     'main-world': join(root, 'src', 'main-world.ts'),
+    notice: join(root, 'src', 'notice.ts'),
   },
   outdir: dist,
   bundle: true,

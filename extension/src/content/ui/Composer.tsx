@@ -1,16 +1,21 @@
 // The popover to write a comment, remove an element, or edit it.
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { Change, Comment, Kind, TextChange } from '@brm/shared';
+import { pageKey, type Change, type Comment, type Kind, type TextChange } from '@brm/shared';
 import { bridge } from '../bridge.ts';
 import { withCapture } from '../capture.ts';
 import { textNodesOf, type Previews } from '../previews.ts';
 import { buildTarget, describe, probeReact, textOf } from '../targets.ts';
 import { useTrackedRect } from '../hooks.ts';
+import { composerDraft, type ComposerDraft } from '../drafts.ts';
 import { px } from '../px.ts';
 
 interface Props {
   el: Element | null;
   initialKind: Kind;
+  /** Restored after a reload of the app. */
+  draft?: ComposerDraft;
+  /** Shown above the form, e.g. when a restored element could not be found. */
+  notice?: string;
   previews: Previews;
   onCreated: (c: Comment) => Promise<void>;
   onCancel: () => void;
@@ -18,13 +23,15 @@ interface Props {
 
 const WIDTH = 340;
 
-export function Composer({ el, initialKind, previews, onCreated, onCancel }: Props) {
-  const [kind, setKind] = useState<Kind>(el ? initialKind : 'comment');
-  const [body, setBody] = useState('');
+export function Composer({ el, initialKind, draft, notice, previews, onCreated, onCancel }: Props) {
+  const [kind, setKind] = useState<Kind>(el ? (draft?.kind ?? initialKind) : 'comment');
+  const [body, setBody] = useState(draft?.body ?? '');
   const textNodes = useMemo(() => (el ? textNodesOf(el) : []), [el]);
   const originals = useMemo(() => textNodes.map((n) => n.nodeValue ?? ''), [textNodes]);
-  const [texts, setTexts] = useState<string[]>(originals);
-  const [css, setCss] = useState('');
+  const [texts, setTexts] = useState<string[]>(() =>
+    draft && draft.texts.length === originals.length ? draft.texts : originals,
+  );
+  const [css, setCss] = useState(draft?.css ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -53,6 +60,17 @@ export function Composer({ el, initialKind, previews, onCreated, onCancel }: Pro
   useEffect(() => {
     bodyRef.current?.focus();
   }, [kind]);
+
+  // Keep what was typed so it survives a reload of the app. A reload never
+  // unmounts us, so clearing on unmount only happens on save, cancel or close.
+  const draftTarget = useMemo(() => (el ? buildTarget(el) : null), [el]);
+  useEffect(() => {
+    const typed = body.trim() || css.trim() || textChanges.length > 0 || kind !== 'comment';
+    composerDraft.set(
+      typed ? { path: pageKey(location.href).path, target: draftTarget, kind, body, texts, css } : null,
+    );
+  }, [kind, body, texts, css, textChanges, draftTarget]);
+  useEffect(() => () => composerDraft.set(null), []);
 
   const resolve = useMemo(() => (el ? () => el : null), [el]);
   const tracked = useTrackedRect(kind === 'remove' ? null : resolve);
@@ -150,6 +168,8 @@ export function Composer({ el, initialKind, previews, onCreated, onCancel }: Pro
             ))}
           </div>
         )}
+
+        {notice && <p class="brm-note">{notice}</p>}
 
         {kind === 'remove' && (
           <p class="brm-help">The element is hidden now. Claude removes it in the code. You can undo this in the sidebar.</p>

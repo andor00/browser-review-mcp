@@ -71,6 +71,11 @@ can stop and start it at any time.
 After `pnpm build` (or while `pnpm dev:extension` runs), click the reload icon
 on the extension card in `brave://extensions` and reload your app tab.
 
+On any other page, the extension icon (and the shortcuts) open a short note that
+it only works on localhost, with buttons to switch to your open localhost tabs.
+On a localhost tab that was open before you loaded the extension, it asks you to
+reload the page.
+
 Brave asks for access to all sites. That is only for screenshots: Chrome only
 allows the screenshot API with that permission. The overlay itself only runs on
 localhost.
@@ -154,15 +159,23 @@ claude mcp remove --scope user browser-review
 
 | Action | How |
 |---|---|
-| Show or hide the overlay | the extension icon, or Alt+Shift+R |
-| Comment on an element | **Pick element**, click the element, write, **Add comment** |
+| Show the overlay with the Threads sidebar open (click again to hide) | the extension icon, or Alt+Shift+R |
+| Comment on an element | **Pick element** (Alt+Shift+P), click the element, write, **Add comment** |
 | Pick the parent element | mouse wheel up or arrow up while picking (down goes back) |
 | Remove an element | pick it, **Remove** tab, **Remove element** |
 | Edit text and CSS | pick it, **Edit** tab, change the texts, add CSS, **Save edit** |
-| Comment on the page | **Page comment** |
-| See all threads | **Threads** (this page or the whole site, filtered by status) |
+| Comment on the page | **Page comment** (Alt+Shift+C) |
+| See all threads | **Threads** (Alt+Shift+T): this page or the whole site, filtered by status |
+| Jump to a thread's element | **Go to** in the thread. On another page it opens that page first. If the element is gone, you land on the page. **Open page** always opens the page itself. |
 | Save a comment | Ctrl+Enter |
 | Cancel | Esc |
+
+Change the shortcuts in `brave://extensions/shortcuts`.
+
+What you type survives a reload of your app (dev server restart, full HMR reload,
+F5): an unsent comment, removal or edit reopens on the same element with your
+text, and so do unsent replies. Drafts are kept per tab until you save, cancel
+or close the tab.
 
 ### Statuses
 
@@ -202,12 +215,19 @@ pnpm test            # server and extension tests
 pnpm typecheck
 ```
 
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
+and the version bumps itself: `fix:` bumps the patch, `feat:` the minor, `feat!:` or
+`BREAKING CHANGE:` the major. Git hooks check the message and do the bump
+(`pnpm install` turns them on). See [CLAUDE.md](CLAUDE.md).
+
 Layout:
 
 ```
 shared/      types used by both sides
 server/      review server: HTTP API, WebSocket, MCP, SQLite (runs .ts directly on Node 26)
 extension/   MV3 extension: background worker, overlay (Preact in a Shadow DOM), React probe
+scripts/     version bumps from Conventional Commits
+.githooks/   commit-msg check and post-commit version bump
 docs/        plan
 ```
 

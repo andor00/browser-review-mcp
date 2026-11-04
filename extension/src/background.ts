@@ -5,11 +5,13 @@ import type {
   ApiResponse,
   CaptureResponse,
   ContentRequest,
+  OverlayCommand,
   PortEvent,
   PrepareCaptureResponse,
   ScreenshotDataResponse,
   TabRequest,
 } from './messages.ts';
+import { isLocalUrl } from './local.ts';
 
 const BASE = `http://127.0.0.1:${DEFAULT_PORT}`;
 const WS_URL = `ws://127.0.0.1:${DEFAULT_PORT}/ws`;
@@ -251,14 +253,59 @@ async function captureForComment(c: Comment): Promise<{ page: string; element: s
   }
 }
 
-// ---------- toggle ----------
+// ---------- toggle, shortcuts, and the "only on localhost" notice ----------
 
-async function toggle(tabId: number | undefined): Promise<void> {
-  if (tabId === undefined) return;
-  await chrome.tabs.sendMessage(tabId, { type: 'toggle' } satisfies TabRequest).catch(() => {});
+const NOTICE = 'notice.html';
+
+/**
+ * Off localhost the action opens a popup that explains why nothing happens.
+ * On localhost the popup is off, so a click reaches onClicked and toggles the overlay.
+ */
+function syncPopup(tabId: number, url: string | undefined): void {
+  const popup = url && isLocalUrl(url) ? '' : `${NOTICE}?reason=not-localhost`;
+  void chrome.action.setPopup({ tabId, popup }).catch(() => {});
 }
 
-chrome.action.onClicked.addListener((tab) => void toggle(tab.id));
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.url !== undefined || info.status === 'loading') syncPopup(tabId, tab.url);
+});
+void chrome.tabs.query({}).then((tabs) => {
+  for (const t of tabs) if (t.id !== undefined) syncPopup(t.id, t.url);
+});
+
+/** Opens the notice popup from code (shortcuts, or a localhost tab without the overlay). */
+async function showNotice(tab: chrome.tabs.Tab, reason: 'not-localhost' | 'not-loaded'): Promise<void> {
+  if (tab.id === undefined) return;
+  await chrome.action.setPopup({ tabId: tab.id, popup: `${NOTICE}?reason=${reason}` });
+  try {
+    await chrome.action.openPopup({ windowId: tab.windowId });
+  } catch {
+    // openPopup can fail (no focused window, older browser). The next click shows it.
+    return;
+  }
+  syncPopup(tab.id, tab.url);
+}
+
+async function sendToTab(tab: chrome.tabs.Tab | undefined, req: TabRequest): Promise<void> {
+  if (tab?.id === undefined) return;
+  if (!tab.url || !isLocalUrl(tab.url)) return showNotice(tab, 'not-localhost');
+  try {
+    await chrome.tabs.sendMessage(tab.id, req);
+  } catch (err) {
+    // Nothing listens: the tab was open before the extension was (re)loaded.
+    // (Other errors, like no reply to a fire-and-forget message, are fine.)
+    if (/Receiving end does not exist|Could not establish connection/i.test(String(err))) {
+      await showNotice(tab, 'not-loaded');
+    }
+  }
+}
+
+const OVERLAY_COMMANDS: readonly string[] = ['pick-element', 'page-comment', 'toggle-threads'] satisfies OverlayCommand[];
+
+chrome.action.onClicked.addListener((tab) => void sendToTab(tab, { type: 'toggle' }));
 chrome.commands.onCommand.addListener((command, tab) => {
-  if (command === 'toggle-overlay') void toggle(tab?.id);
+  if (command === 'toggle-overlay') void sendToTab(tab, { type: 'toggle' });
+  else if (OVERLAY_COMMANDS.includes(command)) {
+    void sendToTab(tab, { type: 'command', command: command as OverlayCommand });
+  }
 });
