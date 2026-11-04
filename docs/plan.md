@@ -1,6 +1,6 @@
 # browser-review-mcp: plan
 
-Status: v0.1 built and tested (server tests, unit tests, end-to-end run in Chromium).
+Status: v0.2 built and tested. The MCP server moved to npm (`browser-review-mcp`, started by Claude Code), the data moved into the extension.
 Repo: https://github.com/andor00/browser-review-mcp. Setup guide: README.md.
 
 ## Goal
@@ -15,32 +15,42 @@ Only for me, on this machine. Only localhost sites.
 ## The two parts
 
 ```
-Brave extension  <-- HTTP + WebSocket -->  review server  <-- MCP (HTTP) -->  Claude Code
-(overlay, picker,                          (127.0.0.1:4777,
- sidebar)                                   SQLite + PNG files)
+Brave extension  <---- WebSocket ---->  browser-review-mcp  <-- MCP (stdio) -->  Claude Code
+(overlay, sidebar,                      (127.0.0.1:4777,                         (starts it
+ data in IndexedDB)                      a bridge, no data)                       per session)
 ```
 
-Everything is TypeScript (strict), Node 26 (pinned in `.nvmrc` and `engines`),
+Everything is TypeScript (strict), Node 26 for development (pinned in `.nvmrc`),
 pnpm workspaces.
 
 1. **Extension** (Manifest V3). The UI runs only on `http://localhost/*` and
    `http://127.0.0.1/*`. Built with esbuild (content scripts must be one plain
    script file each, esbuild does that with no plugins). UI in Preact inside a
-   Shadow DOM.
-2. **Review server**. Runs straight from the `.ts` files (Node 26 strips types,
-   no build step). One process that does two jobs:
-   - a small HTTP API + WebSocket for the extension
-   - an MCP endpoint (`/mcp`, Streamable HTTP, MCP TypeScript SDK v2) for
-     Claude Code
+   Shadow DOM. The background worker **owns all data**: comments, threads and
+   screenshots in IndexedDB (`store.ts` over `idb.ts`). So reviewing works with
+   no Claude session open.
+2. **browser-review-mcp** (npm package, `server/`). Works like Browser MCP:
+   Claude Code starts it over stdio with each session, so I never start a
+   server myself. Added once with:
+   `claude mcp add --scope user browser-review -- npx -y browser-review-mcp@latest`
 
-   One process means the extension works even when no Claude session is open,
-   and Claude always sees the same data. Data lives in
-   `~/.local/share/browser-review-mcp/` (SQLite via built-in `node:sqlite`,
-   screenshots as PNG files). Binds to 127.0.0.1 only, checks `Host` and
-   `Origin` on every request so other websites can't talk to it.
+   It is only a bridge. It listens on `ws://127.0.0.1:4777`; the extension
+   connects there and answers Claude's tool calls from its store (the calls are
+   typed in `shared/`, `BridgeCalls`). Bundled with esbuild into one
+   `dist/cli.js` so `npx` installs nothing else. Needs Node 20+.
 
-   Added to Claude Code once with:
-   `claude mcp add --transport http --scope user browser-review http://127.0.0.1:4777/mcp`
+   Several Claude Code sessions: the first process to get the port is the hub;
+   the others connect to it on `/peer` and send their calls through it. When the
+   hub's session ends, a peer takes the port over and the extension reconnects
+   (it retries every few seconds).
+
+   Security: binds to 127.0.0.1 only, checks `Host` (DNS rebinding), accepts
+   `/ws` only from a `chrome-extension://` origin and `/peer` only from
+   non-browser clients (no Origin, no Sec-Fetch headers). Websites get a 403.
+
+Why not run the MCP server inside the extension: Claude Code is a separate
+program and needs a process or a local address to talk to; an extension can't
+listen on a port. Browser MCP solves it the same way.
 
 ### Why the extension asks for "all sites"
 
@@ -141,7 +151,7 @@ picks them up one by one.
 browser-review-mcp/
   docs/plan.md
   shared/             types shared by server and extension
-  server/             review server (HTTP API, WebSocket, MCP, SQLite)
+  server/             browser-review-mcp (MCP over stdio, WebSocket bridge to the extension)
   extension/          MV3 extension (background, content script, main-world probe)
   package.json        pnpm workspaces, engines: node >= 26
   pnpm-workspace.yaml

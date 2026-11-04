@@ -27,7 +27,8 @@ export function App({ previews }: { previews: Previews }) {
   const href = useHref();
   const { origin, path } = pageKey(href);
   const [comments, setComments] = useState<Comment[]>([]);
-  const [connected, setConnected] = useState(true);
+  /** A Claude Code session is connected. */
+  const [connected, setConnected] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [mode, setMode] = useState<Mode>({ type: 'idle' });
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -39,11 +40,9 @@ export function App({ previews }: { previews: Previews }) {
 
   const load = useCallback(async () => {
     try {
-      const { data, offline } = await bridge.listComments(origin);
-      setComments(data);
-      if (offline) setConnected(false);
+      setComments(await bridge.listComments(origin));
     } catch {
-      setConnected(false);
+      // extension reloaded: keep what we have
     }
   }, [origin]);
 
@@ -52,7 +51,6 @@ export function App({ previews }: { previews: Previews }) {
     return bridge.subscribe((ev) => {
       if (ev.type === 'status') {
         setConnected(ev.connected);
-        if (ev.connected) void load();
       } else if (ev.type === 'comments-changed' && ev.origin === origin) {
         void load();
       }
@@ -316,6 +314,7 @@ export function App({ previews }: { previews: Previews }) {
         onPageComment={() => setMode({ type: 'compose', el: null, kind: 'comment' })}
         onToggleSidebar={() => setSidebarStored(!sidebarOpen)}
         onHide={() => setHiddenStored(true)}
+        onHelp={() => bridge.openHelp()}
       />
     </>
   );

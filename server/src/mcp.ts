@@ -1,8 +1,7 @@
-import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
+import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod';
-import { STATUSES, STATUS_LABELS, type Comment, type ScreenshotKind } from '@brm/shared';
-import { decodePngDataUrl, StoreError, type Store } from './store.ts';
-import type { Hub } from './hub.ts';
+import { STATUSES, STATUS_LABELS, type ScreenshotKind } from '@brm/shared';
+import type { BridgeLike } from './bridge.ts';
 import { formatComment, formatListLine } from './format.ts';
 
 type Content =
@@ -19,16 +18,17 @@ function text(t: string): ToolResult {
   return { content: [{ type: 'text', text: t }] };
 }
 
-function image(png: Buffer): Content {
-  return { type: 'image', data: png.toString('base64'), mimeType: 'image/png' };
+/** "data:image/png;base64,AAA" -> image content with "AAA". */
+function image(dataUrl: string): Content {
+  return { type: 'image', data: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/png' };
 }
 
-/** Turns store errors into readable tool errors instead of protocol errors. */
+/** Turns errors (from the extension, or not connected) into readable tool errors instead of protocol errors. */
 async function guarded(fn: () => ToolResult | Promise<ToolResult>): Promise<ToolResult> {
   try {
     return await fn();
   } catch (err) {
-    const msg = err instanceof StoreError || err instanceof Error ? err.message : String(err);
+    const msg = err instanceof Error ? err.message : String(err);
     return { content: [{ type: 'text', text: msg }], isError: true };
   }
 }
@@ -40,7 +40,7 @@ Each comment is a general page comment or pinned to one element, and is either a
 Workflow: list_comments, then for each one get_comment, start_work, fix it in the source code, optionally capture_screenshot to check, then submit_solution with a short note on how you solved it.
 You can only set "in progress" and "review ready". The user accepts or reopens in the browser. Use reply to ask the user a question in the thread.`;
 
-export function buildMcpServer(store: Store, hub: Hub, version: string): McpServer {
+export function buildMcpServer(bridge: BridgeLike, version: string): McpServer {
   const server = new McpServer({ name: 'browser-review', version }, { instructions: INSTRUCTIONS });
 
   server.registerTool(
@@ -57,9 +57,9 @@ export function buildMcpServer(store: Store, hub: Hub, version: string): McpServ
       }),
     },
     ({ status, origin }) =>
-      guarded(() => {
+      guarded(async () => {
         const statuses = status?.length ? status : (['open', 'in_progress'] as const);
-        const list = store.list({ origin, statuses: [...statuses] });
+        const list = await bridge.call('list', { origin, statuses: [...statuses] });
         const labels = statuses.map((s) => STATUS_LABELS[s].toLowerCase()).join(', ');
         if (list.length === 0) return text(`No comments with status ${labels}.`);
         return text(
@@ -79,13 +79,12 @@ export function buildMcpServer(store: Store, hub: Hub, version: string): McpServ
       }),
     },
     ({ id, with_screenshot }) =>
-      guarded(() => {
-        const c = store.mustGet(id);
+      guarded(async () => {
+        const c = await bridge.call('get', { id });
         const result = text(formatComment(c));
         if (with_screenshot !== false) {
-          const meta = store.latestScreenshot(id, c.target ? 'element' : 'page', 'initial');
-          const shot = meta ? store.readScreenshot(meta.id) : null;
-          if (shot) result.content.push(image(shot.png));
+          const shot = await bridge.call('screenshot', { id, kind: c.target ? 'element' : 'page', which: 'initial' });
+          if (shot) result.content.push(image(shot.dataUrl));
         }
         return result;
       }),
@@ -106,14 +105,14 @@ export function buildMcpServer(store: Store, hub: Hub, version: string): McpServ
       }),
     },
     ({ id, kind, which }) =>
-      guarded(() => {
+      guarded(async () => {
         const k: ScreenshotKind = kind ?? 'page';
-        const meta = store.latestScreenshot(id, k, which === 'initial' ? 'initial' : undefined);
-        if (!meta) return { ...text(`Comment #${id} has no ${k} screenshot.`), isError: true };
-        const shot = store.readScreenshot(meta.id);
-        if (!shot) return { ...text('The screenshot file is missing.'), isError: true };
-        const when = meta.source === 'initial' ? 'taken when the comment was made' : 'captured later';
-        return { content: [{ type: 'text', text: `${k} screenshot, ${when} (${meta.createdAt}).` }, image(shot.png)] };
+        const shot = await bridge.call('screenshot', { id, kind: k, which: which ?? 'latest' });
+        if (!shot) return { ...text(`Comment #${id} has no ${k} screenshot.`), isError: true };
+        const when = shot.meta.source === 'initial' ? 'taken when the comment was made' : 'captured later';
+        return {
+          content: [{ type: 'text', text: `${k} screenshot, ${when} (${shot.meta.createdAt}).` }, image(shot.dataUrl)],
+        };
       }),
   );
 
@@ -126,19 +125,12 @@ export function buildMcpServer(store: Store, hub: Hub, version: string): McpServ
     },
     ({ id }) =>
       guarded(async () => {
-        const c = store.mustGet(id);
-        const result = await hub.requestCapture(c);
-        const page = decodePngDataUrl(result.page);
-        store.addScreenshot(id, 'page', 'capture', page);
+        const result = await bridge.call('capture', { id });
         const content: Content[] = [];
-        const notes = [result.note].filter(Boolean).join(' ');
-        content.push({ type: 'text', text: `Fresh page screenshot of ${c.url}.${notes ? ` ${notes}` : ''}` });
-        content.push(image(page));
-        if (result.element) {
-          const el = decodePngDataUrl(result.element);
-          store.addScreenshot(id, 'element', 'capture', el);
-          content.push({ type: 'text', text: 'Crop of the element:' }, image(el));
-        }
+        const note = result.note ? ` ${result.note}` : '';
+        content.push({ type: 'text', text: `Fresh page screenshot of ${result.comment.url}.${note}` });
+        content.push(image(result.page));
+        if (result.element) content.push({ type: 'text', text: 'Crop of the element:' }, image(result.element));
         return { content };
       }),
   );
@@ -150,9 +142,8 @@ export function buildMcpServer(store: Store, hub: Hub, version: string): McpServ
       inputSchema: z.object({ id: idSchema }),
     },
     ({ id }) =>
-      guarded(() => {
-        const c = store.startWork(id);
-        hub.commentsChanged(c.origin);
+      guarded(async () => {
+        const c = await bridge.call('start_work', { id });
         return text(`#${c.id} is now ${STATUS_LABELS[c.status].toLowerCase()}.`);
       }),
   );
@@ -165,9 +156,8 @@ export function buildMcpServer(store: Store, hub: Hub, version: string): McpServ
       inputSchema: z.object({ id: idSchema, message: z.string().min(1).max(20000) }),
     },
     ({ id, message }) =>
-      guarded(() => {
-        const c = store.addMessage(id, 'claude', message);
-        hub.commentsChanged(c.origin);
+      guarded(async () => {
+        const c = await bridge.call('reply', { id, message });
         return text(`Reply added to #${c.id}.`);
       }),
   );
@@ -184,16 +174,11 @@ export function buildMcpServer(store: Store, hub: Hub, version: string): McpServ
       }),
     },
     ({ id, note, files }) =>
-      guarded(() => {
-        const c: Comment = store.submitSolution(id, note, files);
-        hub.commentsChanged(c.origin);
+      guarded(async () => {
+        const c = await bridge.call('submit_solution', { id, note, files: files ?? [] });
         return text(`#${c.id} is now review ready. The user will accept or reopen it.`);
       }),
   );
 
   return server;
-}
-
-export function createMcp(store: Store, hub: Hub, version: string) {
-  return createMcpHandler(() => buildMcpServer(store, hub, version));
 }

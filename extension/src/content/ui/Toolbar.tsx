@@ -8,6 +8,7 @@ interface Props {
   onPick: () => void;
   onToggleSidebar: () => void;
   onHide: () => void;
+  onHelp: () => void;
 }
 
 export function Toolbar(p: Props) {
@@ -15,7 +16,11 @@ export function Toolbar(p: Props) {
     <div class="brm-ui brm-toolbar" role="toolbar" aria-label="Browser Review">
       <span
         class={`brm-dot ${p.connected ? 'is-on' : 'is-off'}`}
-        title={p.connected ? 'Connected to the review server' : 'Review server not running. Start it with: pnpm server'}
+        title={
+          p.connected
+            ? 'Claude Code is connected'
+            : 'Claude Code is not connected. Your comments are saved; Claude sees them when a session with browser-review runs. Click ? for setup.'
+        }
       />
       <button class={`brm-tool ${p.picking ? 'is-active' : ''}`} onClick={p.onPick} title="Pick an element to comment on, remove or edit (Alt+Shift+P)">
         <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -33,6 +38,9 @@ export function Toolbar(p: Props) {
         Threads
         {p.openCount > 0 && <span class="brm-count">{p.openCount}</span>}
         {p.reviewCount > 0 && <span class="brm-count st-review_ready" title="Review ready">{p.reviewCount}</span>}
+      </button>
+      <button class="brm-icon-btn" onClick={p.onHelp} title="Help: setup and how to use">
+        ?
       </button>
       <button class="brm-icon-btn" onClick={p.onHide} title="Hide the overlay (Alt+Shift+R or the extension icon brings it back)">
         ✕

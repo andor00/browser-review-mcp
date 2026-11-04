@@ -5,6 +5,11 @@ const params = new URLSearchParams(location.search);
 const reason = params.get('reason') === 'not-loaded' ? 'not-loaded' : 'not-localhost';
 const $ = (id: string) => document.getElementById(id)!;
 
+$('help').addEventListener('click', () => {
+  void chrome.tabs.create({ url: chrome.runtime.getURL('help.html') });
+  window.close();
+});
+
 async function main(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   $(reason).hidden = false;

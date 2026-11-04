@@ -1,4 +1,7 @@
 node_modules/
 extension/dist/
+extension/dist-firefox/
+server/dist/
 *.log
 .DS_Store
+release/

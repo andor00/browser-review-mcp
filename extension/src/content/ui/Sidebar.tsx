@@ -68,6 +68,9 @@ export function Sidebar({ comments, path, connected, focusId, onClose, onHover, 
             Whole site
           </button>
         </div>
+        <button class="brm-icon-btn" title="Help" onClick={() => bridge.openHelp()}>
+          ?
+        </button>
         <button class="brm-icon-btn" title="Close (Alt+Shift+T)" onClick={onClose}>
           ✕
         </button>
@@ -84,8 +87,17 @@ export function Sidebar({ comments, path, connected, focusId, onClose, onHover, 
       </nav>
       {!connected && (
         <p class="brm-warn">
-          The review server is not running. Start it in the project folder with <code>pnpm server</code>. Showing the
-          last known state.
+          Claude Code is not connected. Your comments are saved here; Claude sees them as soon as a Claude Code session
+          with browser-review runs.{' '}
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              bridge.openHelp('setup');
+            }}
+          >
+            How to set it up
+          </a>
         </p>
       )}
       <div class="brm-side-list">

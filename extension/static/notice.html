@@ -88,6 +88,19 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      button.help {
+        margin: 12px 0 0;
+        border: 0;
+        padding: 0;
+        background: none;
+        color: #5b4cdb;
+        font-weight: 500;
+        text-align: left;
+      }
+      button.help:hover {
+        background: none;
+        text-decoration: underline;
+      }
       [hidden] {
         display: none !important;
       }
@@ -110,6 +123,8 @@
       <p>The overlay is not loaded in this tab yet. That happens when the tab was open before the extension was installed or reloaded.</p>
       <button id="reload" class="primary">Reload this page</button>
     </section>
+
+    <button id="help" class="help">How to use Browser Review</button>
 
     <script src="notice.js"></script>
   </body>

@@ -1,6 +1,7 @@
 {
   "name": "@brm/extension",
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,6 +10,8 @@
   "scripts": {
     "build": "node build.ts",
     "dev": "node build.ts --watch",
+    "build:firefox": "node build.ts --firefox",
+    "package": "node build.ts --zip && node build.ts --zip --firefox",
     "test": "node --test \"src/**/*.test.ts\"",
     "typecheck": "tsc -p . && tsc -p tsconfig.node.json"
   },

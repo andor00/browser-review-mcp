@@ -1,6 +1,7 @@
 {
   "name": "browser-review-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,10 +9,13 @@
   },
   "packageManager": "pnpm@12.9.1",
   "scripts": {
-    "server": "pnpm --dir server start",
-    "dev:server": "pnpm --dir server dev",
-    "build": "pnpm --dir extension build",
+    "build": "pnpm --dir extension build && pnpm --dir extension build:firefox && pnpm --dir server build",
+    "build:extension": "pnpm --dir extension build",
+    "build:firefox": "pnpm --dir extension build:firefox",
+    "build:mcp": "pnpm --dir server build",
     "dev:extension": "pnpm --dir extension dev",
+    "package": "pnpm --dir extension package",
+    "publish:mcp": "pnpm --dir server publish",
     "typecheck": "pnpm -r typecheck",
     "test": "node --test \"scripts/**/*.test.ts\" && pnpm -r test",
     "version:bump": "node scripts/version.ts bump",

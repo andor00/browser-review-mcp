@@ -1,4 +1,4 @@
-// Types and small helpers shared by the review server and the extension.
+// Types and small helpers shared by the MCP process and the extension.
 // Keep this file free of Node or DOM APIs: it runs in both places.
 
 export const STATUSES = ['open', 'in_progress', 'review_ready', 'accepted'] as const;
@@ -111,23 +111,39 @@ export interface CreateCommentInput {
   screenshots?: ScreenshotUpload;
 }
 
-/** Messages on the WebSocket between server and extension background. */
-export type ServerToExtension =
+// ---------- bridge: MCP process <-> extension ----------
+//
+// Claude Code starts the MCP process (npx browser-review-mcp). It listens on
+// ws://127.0.0.1:4777. The extension connects to it and owns all data: the MCP
+// process only forwards Claude's tool calls as "call" messages.
+
+/** Every call the MCP process can make, with its params and result. */
+export interface BridgeCalls {
+  list: { params: { statuses: Status[]; origin?: string }; result: Comment[] };
+  get: { params: { id: number }; result: Comment };
+  screenshot: {
+    params: { id: number; kind: ScreenshotKind; which: 'latest' | 'initial' };
+    result: { meta: ScreenshotMeta; dataUrl: string } | null;
+  };
+  capture: {
+    params: { id: number };
+    result: { comment: Comment; page: string; element: string | null; note: string | null };
+  };
+  start_work: { params: { id: number }; result: Comment };
+  reply: { params: { id: number; message: string }; result: Comment };
+  submit_solution: { params: { id: number; note: string; files: string[] }; result: Comment };
+}
+export type BridgeMethod = keyof BridgeCalls;
+
+export type ToExtension =
   | { type: 'hello'; version: string }
-  | { type: 'comments-changed'; origin: string }
-  | { type: 'capture-request'; requestId: string; comment: Comment }
+  | { type: 'call'; id: number; method: BridgeMethod; params: unknown }
   | { type: 'ping' };
 
-export type ExtensionToServer =
-  | {
-      type: 'capture-result';
-      requestId: string;
-      ok: true;
-      page: string;
-      element: string | null;
-      note: string | null;
-    }
-  | { type: 'capture-result'; requestId: string; ok: false; error: string }
+export type FromExtension =
+  | { type: 'hello'; version: string }
+  | { type: 'result'; id: number; ok: true; data: unknown }
+  | { type: 'result'; id: number; ok: false; error: string }
   | { type: 'pong' };
 
 export const STATUS_LABELS: Record<Status, string> = {
@@ -157,3 +173,6 @@ export function isPreviewActive(c: Pick<Comment, 'kind' | 'status'>): boolean {
 }
 
 export const DEFAULT_PORT = 4777;
+
+/** What the user runs once to add the MCP server to Claude Code. */
+export const MCP_ADD_COMMAND = 'claude mcp add --scope user browser-review -- npx -y browser-review-mcp@latest';

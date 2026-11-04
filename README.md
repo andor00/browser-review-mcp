@@ -1,7 +1,7 @@
 # Browser Review
 
-Review your own localhost dev app in Brave the way you would in Figma, and let
-Claude Code fix it.
+Review your own localhost dev app in Brave, Chrome or Firefox the way you would
+in Figma, and let Claude Code fix it.
 
 - **Comment** on the whole page or on one element. A numbered pin marks it.
 - **Remove** an element (like an adblocker's element picker). It disappears right
@@ -14,109 +14,75 @@ Claude Code fix it.
   **reopen** it in the browser.
 
 ```
-Brave extension  <-- HTTP + WebSocket -->  review server  <-- MCP -->  Claude Code
-(overlay, picker,                          127.0.0.1:4777
- sidebar)                                  SQLite + screenshots
+Brave extension  <---- WebSocket ---->  browser-review-mcp  <-- MCP (stdio) -->  Claude Code
+(overlay, sidebar,                      127.0.0.1:4777                           (starts it per session)
+ comments in IndexedDB)                 (npx, a bridge)
 ```
+
+You never start a server yourself: Claude Code starts `browser-review-mcp` with
+each session (like Browser MCP), and the extension connects to it. Comments live
+in the extension, so you can review while no Claude session is open.
 
 Works only on `http://localhost` and `http://127.0.0.1` pages. Everything stays
 on your machine.
 
-## Requirements
+## Setup
 
-- Node 26 (`nvm use` picks it up from `.nvmrc`)
-- pnpm
-- Brave (or another Chromium browser)
-- Claude Code
+### 1. Install the extension
 
-## 1. Install and build
+**Brave, Chrome, Edge.** Until it is in the Chrome Web Store, load it unpacked:
 
-```sh
-git clone https://github.com/andor00/browser-review-mcp.git
-cd browser-review-mcp
-nvm use
-pnpm install
-pnpm build
-```
+1. Get the extension folder: extract a release zip (`browser-review-<version>-chrome.zip`, also for Brave and Edge; from the GitHub Releases page)
+   into a folder you keep, for example `~/extensions/browser-review`, or build it
+   from this repo (`extension/dist`, see Development).
+2. Go to `brave://extensions` and turn on **Developer mode** (top right).
+3. Click **Load unpacked** and pick that folder.
+4. Pin the icon (puzzle icon in the toolbar).
 
-`pnpm build` writes the extension to `extension/dist/`.
+**Firefox (140 or newer).** Download `browser-review-<version>-firefox.xpi`
+from the GitHub release (signed by Mozilla) and open it in Firefox. That installs
+it for good. Without a signed release:
 
-## 2. Start the review server
+- To try it: `about:debugging`, **This Firefox**, **Load Temporary Add-on**, and
+  pick the Firefox zip (`browser-review-<version>-firefox.zip`) or
+  `extension/dist-firefox/manifest.json`. Firefox removes temporary add-ons
+  (and their comments) when it closes.
+- To keep it: it must be signed by Mozilla. Self-distribution works without a
+  public listing: `npx web-ext sign --channel=unlisted --source-dir
+  extension/dist-firefox` with API keys from addons.mozilla.org gives a signed
+  `.xpi` you install by opening it in Firefox. (Firefox Developer Edition and
+  Nightly can also run unsigned add-ons with `xpinstall.signatures.required`
+  set to false in `about:config`.)
 
-```sh
-pnpm server
-```
+Comments are per browser: Brave and Firefox each keep their own.
 
-You should see:
-
-```
-Browser Review server 0.1.0
-  extension API  http://127.0.0.1:4777/api
-  MCP            http://127.0.0.1:4777/mcp
-  data           /home/you/.local/share/browser-review-mcp
-```
-
-Keep it running while you review. Comments are kept in the data folder, so you
-can stop and start it at any time.
-
-## 3. Load the extension in Brave
-
-1. Go to `brave://extensions`.
-2. Turn on **Developer mode** (top right).
-3. Click **Load unpacked** and pick the `extension/dist` folder.
-4. Open your dev app, for example `http://localhost:5173`. A toolbar appears in
-   the bottom right corner. The green dot means the extension is connected to
-   the server.
-
-After `pnpm build` (or while `pnpm dev:extension` runs), click the reload icon
-on the extension card in `brave://extensions` and reload your app tab.
-
-On any other page, the extension icon (and the shortcuts) open a short note that
-it only works on localhost, with buttons to switch to your open localhost tabs.
-On a localhost tab that was open before you loaded the extension, it asks you to
-reload the page.
+The **help page** opens on install. It's also under right-click on the icon,
+**Options** (Firefox: **Manage Extension**, **Preferences**), and behind the **?**
+in the overlay. It shows the setup command and
+whether Claude Code is connected.
 
 Brave asks for access to all sites. That is only for screenshots: Chrome only
 allows the screenshot API with that permission. The overlay itself only runs on
 localhost.
 
-## 4. Add it to Claude Code
-
-The review server is an MCP server over HTTP. You add it to Claude Code once.
-
-### Add the server
+### 2. Connect Claude Code (once)
 
 Run this in a terminal (not inside Claude Code):
 
 ```sh
-claude mcp add --transport http --scope user browser-review http://127.0.0.1:4777/mcp
+claude mcp add --scope user browser-review -- npx -y browser-review-mcp@latest
 ```
 
-- `--transport http`: the server speaks MCP over HTTP. There is no command for
-  Claude Code to start, so the server must already be running (step 2).
-- `--scope user`: available in every project. Leave this out (or use
-  `--scope local`) to add it to the current project only.
+- `--scope user`: available in every project.
 - `browser-review` is the name. The tools show up as
   `mcp__browser-review__list_comments` and so on.
+- Needs Node.js 20 or newer for `npx`.
 
-### Check that it works
+Check with `claude mcp list`: `browser-review` should say **Connected**. Start a
+Claude Code session and the dot in the overlay (and on the help page) turns green.
 
-```sh
-claude mcp list
-```
-
-`browser-review` should say **Connected**. Inside Claude Code, `/mcp` shows the
-same and lists the seven tools.
-
-If it says it failed to connect, the review server is not running. Start it with
-`pnpm server`, then reconnect from `/mcp` in Claude Code (or start a new
-session).
-
-### Optional: no permission prompt for every tool
-
-Claude Code asks before it uses a tool from a new MCP server. To allow all
-Browser Review tools, add this to `~/.claude/settings.json` (or to
-`.claude/settings.json` in your app's project):
+Optional, no permission prompt for every tool: add this to
+`~/.claude/settings.json`:
 
 ```json
 {
@@ -126,36 +92,27 @@ Browser Review tools, add this to `~/.claude/settings.json` (or to
 }
 ```
 
-### Use it
+To remove it: `claude mcp remove --scope user browser-review`.
 
-Open Claude Code in your **app's** project folder (the code you are reviewing,
-not this repo), and say:
+## Use it
 
-> Check the review comments.
+1. Open your dev app, for example `http://localhost:5173`, and click the
+   extension icon. The review sidebar opens.
+2. Leave comments, removals and edits.
+3. Open Claude Code in your **app's** project folder and say:
 
-Claude then:
+   > Check the review comments.
 
-1. calls `list_comments` to see what is open,
-2. calls `get_comment` for each one (with the element's screenshot),
-3. calls `start_work`, so the comment shows **In progress** in your browser,
-4. fixes it in the code,
-5. can call `capture_screenshot` to look at the result in your open tab,
-6. calls `submit_solution` with a short note, so the comment shows
-   **Review ready**.
+   Claude calls `list_comments`, then for each one `get_comment` (with the
+   screenshot), `start_work` (shows **In progress**), fixes it in the code,
+   optionally `capture_screenshot` to look at the result in your tab, and
+   `submit_solution` with a short note (shows **Review ready**).
 
-You can also be more specific:
+   More specific: *"Fix review comment #12."* or *"Check the review comments for
+   http://localhost:5173 only."*
+4. In the sidebar, **Accept solution** or write what is still wrong and **Reopen**.
 
-> Fix review comment #12.
-
-> Check the review comments for http://localhost:5173 only.
-
-### Remove it again
-
-```sh
-claude mcp remove --scope user browser-review
-```
-
-## Using the overlay
+### The overlay
 
 | Action | How |
 |---|---|
@@ -167,6 +124,7 @@ claude mcp remove --scope user browser-review
 | Comment on the page | **Page comment** (Alt+Shift+C) |
 | See all threads | **Threads** (Alt+Shift+T): this page or the whole site, filtered by status |
 | Jump to a thread's element | **Go to** in the thread. On another page it opens that page first. If the element is gone, you land on the page. **Open page** always opens the page itself. |
+| Help | **?** in the toolbar or the sidebar |
 | Save a comment | Ctrl+Enter |
 | Cancel | Esc |
 
@@ -177,6 +135,11 @@ F5): an unsent comment, removal or edit reopens on the same element with your
 text, and so do unsent replies. Drafts are kept per tab until you save, cancel
 or close the tab.
 
+On any other page, the extension icon (and the shortcuts) open a short note that
+it only works on localhost, with buttons to switch to your open localhost tabs.
+On a localhost tab that was open before you loaded the extension, it asks you to
+reload the page.
+
 ### Statuses
 
 | Status | Set by | Meaning |
@@ -186,15 +149,12 @@ or close the tab.
 | Review ready | Claude | fixed, with a note on how; waiting for you |
 | Accepted | you | done |
 
-Claude can only set **In progress** and **Review ready**. In the sidebar you
-press **Accept solution**, or write what is still wrong and press **Reopen**.
+Claude can only set **In progress** and **Review ready**. Removals and edits are
+shown as a preview while the status is Open or In progress. When Claude marks it
+Review ready the preview turns off, so you see what the code really does now.
+**Undo removal** / **Undo edit** brings the element back and drops the task.
 
-Removals and edits are shown as a preview while the status is Open or In
-progress. When Claude marks it Review ready the preview turns off, so you see
-what the code really does now. **Undo removal** / **Undo edit** brings the
-element back and drops the task.
-
-## MCP tools
+### MCP tools
 
 | Tool | What it does |
 |---|---|
@@ -206,43 +166,96 @@ element back and drops the task.
 | `reply` | Write in the thread, for example to ask a question. |
 | `submit_solution` | Set to Review ready with a note and the changed files. |
 
+## Where the data lives
+
+Comments, threads and screenshots are stored in the extension (IndexedDB in your
+browser profile). Reloading or updating the extension keeps them; **removing the
+extension deletes them**.
+
+`browser-review-mcp` stores nothing. It listens on `ws://127.0.0.1:4777` and
+passes Claude's tool calls to the extension. With several Claude Code sessions,
+the first one holds the port and the others go through it; when it closes,
+another takes over.
+
+## Security
+
+- The bridge listens on 127.0.0.1 only and checks the `Host` header (no DNS
+  rebinding).
+- Only the extension (a `chrome-extension://` or `moz-extension://` origin) may
+  connect as the extension, and only local non-browser processes (other Claude Code sessions)
+  as peers. Websites, including other localhost apps, get a 403.
+- Nothing leaves your machine.
+
 ## Development
 
+Needs Node 26 (`nvm use` reads `.nvmrc`) and pnpm.
+
 ```sh
-pnpm dev:server      # server with --watch
-pnpm dev:extension   # rebuild the extension on every change
-pnpm test            # server and extension tests
+pnpm install
+pnpm build              # extension/dist (Chromium), extension/dist-firefox, server/dist/cli.js
+pnpm dev:extension      # rebuild the extension on every change
+pnpm test               # all tests (the MCP one runs it over stdio like Claude Code)
 pnpm typecheck
 ```
 
-Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
-and the version bumps itself: `fix:` bumps the patch, `feat:` the minor, `feat!:` or
+Load `extension/dist` unpacked (see Setup). After a rebuild, click the reload icon
+on the extension card in `brave://extensions` and reload your app tab.
+
+To try the MCP server from this repo instead of npm:
+
+```sh
+claude mcp add --scope user browser-review -- node /path/to/repo/server/src/cli.ts
+```
+
+### Releasing
+
+GitHub Actions (`.github/workflows/ci.yml`) does it:
+
+- **Every push and pull request:** typecheck, tests, the Chrome/Brave/Edge zip,
+  the Firefox zip (checked with Mozilla's `web-ext lint`) and the MCP package.
+  Download them from the run's **Artifacts**.
+- **On main, when the version changed:** a GitHub release `v<version>` with the
+  files and release notes (install steps, plus the `feat`/`fix`/breaking
+  commits since the last release). The version bumps itself from commit messages
+  (below), so a `feat:` or `fix:` commit on main means a new release.
+- **Then, once their keys are set:** Mozilla signs the Firefox add-on (a `.xpi`
+  on the release), `browser-review-mcp` goes to npm, and the Chrome Web Store
+  gets the new version for review. What to set up, and why "signing" differs
+  per browser: [docs/releasing.md](docs/releasing.md).
+
+By hand:
+
+- **Extension zips:** `pnpm package` writes `release/browser-review-<version>-chrome.zip`
+  (Chrome, Brave, Edge) and `release/browser-review-<version>-firefox.zip` (release builds,
+  no sourcemaps). Brave can't install a zip directly: extract it and **Load
+  unpacked**. The zips are also what the Chrome Web Store and
+  addons.mozilla.org take. Check the Firefox one with
+  `npx web-ext lint --source-dir extension/dist-firefox`.
+- **MCP server on npm:** `pnpm publish:mcp` (needs `npm login` once). It builds
+  `server/dist/cli.js`, runs the stdio test against the bundle, and publishes
+  `browser-review-mcp`. pnpm refuses to publish with uncommitted changes.
+
+The version is the same for both and bumps itself from Conventional Commit
+messages: `fix:` bumps the patch, `feat:` the minor, `feat!:` or
 `BREAKING CHANGE:` the major. Git hooks check the message and do the bump
 (`pnpm install` turns them on). See [CLAUDE.md](CLAUDE.md).
 
-Layout:
+### Layout
 
 ```
-shared/      types used by both sides
-server/      review server: HTTP API, WebSocket, MCP, SQLite (runs .ts directly on Node 26)
-extension/   MV3 extension: background worker, overlay (Preact in a Shadow DOM), React probe
+shared/      types used by both sides, including the bridge protocol
+server/      browser-review-mcp: MCP over stdio + WebSocket bridge (npm package)
+extension/   MV3 extension: background worker with the store (IndexedDB),
+             overlay (Preact in a Shadow DOM), help page, notice popup.
+             One code base; build.ts makes the Chromium and the Firefox build.
 scripts/     version bumps from Conventional Commits
 .githooks/   commit-msg check and post-commit version bump
 docs/        plan
 ```
 
-Settings (environment variables for the server):
+`BRM_PORT` changes the bridge port (default 4777), but the extension expects 4777.
 
-| Variable | Default |
-|---|---|
-| `BRM_PORT` | `4777` (the extension expects 4777) |
-| `BRM_DATA_DIR` | `~/.local/share/browser-review-mcp` |
+## License
 
-## Security
-
-- The server listens on 127.0.0.1 only and checks the `Host` header (no DNS
-  rebinding).
-- The extension API only accepts requests from an extension, or from
-  non-browser clients. Websites, including other localhost apps, get a 403.
-- The MCP endpoint only accepts non-browser clients like Claude Code.
-- Screenshots and comments stay in the local data folder.
+[MIT](LICENSE): free for everyone to use, change and share, also commercially.
+Keep the copyright notice.

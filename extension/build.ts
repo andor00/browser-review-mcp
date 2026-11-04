@@ -1,17 +1,29 @@
-// Builds the extension into dist/. Run with `node build.ts` (or `--watch`).
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+// Builds the extension. Run with `node build.ts` (or `--watch`).
+//   (no flag)   Chrome / Brave / Edge into dist/
+//   --firefox   Firefox into dist-firefox/ (same code, Firefox manifest)
+//   --zip       release build (no sourcemaps), zipped into release/
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import * as esbuild from 'esbuild';
+import { filesIn, zip } from './zip.ts';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const dist = join(root, 'dist');
 const watch = process.argv.includes('--watch');
+const release = process.argv.includes('--zip');
+const firefox = process.argv.includes('--firefox');
+const dist = join(root, firefox ? 'dist-firefox' : 'dist');
+
+/** Add-on ID on addons.mozilla.org. Keep it fixed: Firefox keys the add-on's data (IndexedDB) to it. */
+const GECKO_ID = 'browser-review@andor00';
 
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(join(dist, 'icons'), { recursive: true });
-for (const file of ['manifest.json', 'notice.html']) copyFileSync(join(root, 'static', file), join(dist, file));
+for (const file of ['notice.html', 'help.html']) copyFileSync(join(root, 'static', file), join(dist, file));
+copyFileSync(join(root, '..', 'LICENSE'), join(dist, 'LICENSE'));
+const manifest = JSON.parse(readFileSync(join(root, 'static', 'manifest.json'), 'utf8')) as Record<string, unknown>;
+writeFileSync(join(dist, 'manifest.json'), `${JSON.stringify(firefox ? firefoxManifest(manifest) : manifest, null, 2)}\n`);
 for (const size of [16, 48, 128]) writeFileSync(join(dist, 'icons', `${size}.png`), icon(size));
 
 const options: esbuild.BuildOptions = {
@@ -20,15 +32,18 @@ const options: esbuild.BuildOptions = {
     content: join(root, 'src', 'content', 'index.tsx'),
     'main-world': join(root, 'src', 'main-world.ts'),
     notice: join(root, 'src', 'notice.ts'),
+    help: join(root, 'src', 'help.ts'),
   },
   outdir: dist,
   bundle: true,
   format: 'iife',
-  target: 'chrome120',
+  target: firefox ? 'firefox140' : 'chrome120',
   jsx: 'automatic',
   jsxImportSource: 'preact',
   loader: { '.css': 'text' },
-  sourcemap: 'linked',
+  // Firefox's own `browser` namespace is the one with promises everywhere; its `chrome` is a compatibility layer.
+  define: firefox ? { chrome: 'browser' } : {},
+  sourcemap: release ? false : 'linked',
   logLevel: 'info',
 };
 
@@ -38,6 +53,35 @@ if (watch) {
   console.log('Watching. Reload the extension in brave://extensions after a change.');
 } else {
   await esbuild.build(options);
+  if (release) {
+    const { version } = JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8')) as { version: string };
+    const outDir = join(root, '..', 'release');
+    // One Chromium package serves Chrome, Brave and Edge alike.
+    const out = join(outDir, `browser-review-${version}-${firefox ? 'firefox' : 'chrome'}.zip`);
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(out, zip(filesIn(dist)));
+    console.log(`\nPackaged ${out}`);
+  }
+}
+
+/**
+ * Firefox runs MV3 backgrounds as event pages (background.scripts), not service
+ * workers, and needs an add-on ID and a data collection statement for signing.
+ */
+function firefoxManifest(m: Record<string, unknown>): Record<string, unknown> {
+  const { minimum_chrome_version: _min, background: _bg, ...rest } = m;
+  return {
+    ...rest,
+    background: { scripts: ['background.js'] },
+    browser_specific_settings: {
+      gecko: {
+        id: GECKO_ID,
+        // 128: content scripts in the page's MAIN world. 140: data_collection_permissions.
+        strict_min_version: '140.0',
+        data_collection_permissions: { required: ['none'] },
+      },
+    },
+  };
 }
 
 // ---------- icon: a speech bubble with a check, drawn pixel by pixel ----------

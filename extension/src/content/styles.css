@@ -449,6 +449,11 @@ code {
   color: var(--brm-dim);
 }
 
+.brm-warn a {
+  color: var(--brm-accent);
+  font-weight: 500;
+}
+
 /* ---------- sidebar ---------- */
 
 .brm-sidebar {

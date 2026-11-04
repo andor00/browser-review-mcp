@@ -1,46 +1,42 @@
-// Content script side of the messaging with the background worker.
-import type { Comment, CreateCommentInput, Rect, ScreenshotUpload } from '@brm/shared';
+// Content script side of the messaging with the background worker, which owns the data.
+import type { CreateCommentInput, Rect, ScreenshotUpload } from '@brm/shared';
 import type {
-  ApiMethod,
-  ApiResponse,
   CaptureResponse,
   ContentRequest,
   PortEvent,
   ScreenshotDataResponse,
+  StoreOp,
+  StoreOps,
+  StoreResponse,
 } from '../messages.ts';
 
-export class ApiError extends Error {
-  readonly offline: boolean;
-  constructor(message: string, offline: boolean) {
-    super(message);
-    this.offline = offline;
-  }
-}
+export class ApiError extends Error {}
 
 function sendMessage<T>(req: ContentRequest): Promise<T> {
   return chrome.runtime.sendMessage(req) as Promise<T>;
 }
 
-async function api<T>(method: ApiMethod, path: string, body?: unknown): Promise<{ data: T; offline: boolean }> {
-  let res: ApiResponse<T>;
+async function op<K extends StoreOp>(name: K, args: StoreOps[K]['args']): Promise<StoreOps[K]['result']> {
+  let res: StoreResponse<StoreOps[K]['result']>;
   try {
-    res = await sendMessage<ApiResponse<T>>({ type: 'api', method, path, body });
+    res = await sendMessage({ type: 'store', op: name, args });
   } catch {
-    throw new ApiError('The extension was reloaded. Reload this page.', true);
+    throw new ApiError('The extension was reloaded. Reload this page.');
   }
-  if (!res.ok) throw new ApiError(res.error, res.offline);
-  return { data: res.data, offline: res.offline === true };
+  if (!res.ok) throw new ApiError(res.error);
+  return res.data;
 }
 
 export const bridge = {
-  listComments: (origin: string) => api<Comment[]>('GET', `/api/comments?origin=${encodeURIComponent(origin)}`),
-  createComment: async (input: CreateCommentInput) => (await api<Comment>('POST', '/api/comments', input)).data,
-  reply: async (id: number, body: string) => (await api<Comment>('POST', `/api/comments/${id}/messages`, { body })).data,
-  accept: async (id: number) => (await api<Comment>('POST', `/api/comments/${id}/accept`)).data,
-  reopen: async (id: number, body?: string) => (await api<Comment>('POST', `/api/comments/${id}/reopen`, { body })).data,
+  listComments: (origin: string) => op('list', { origin }),
+  createComment: (input: CreateCommentInput) => op('create', input),
+  reply: (id: number, body: string) => op('reply', { id, body }),
+  accept: (id: number) => op('accept', { id }),
+  reopen: (id: number, body?: string) => op('reopen', { id, body }),
   remove: async (id: number) => {
-    await api<{ ok: true }>('DELETE', `/api/comments/${id}`);
+    await op('delete', { id });
   },
+  openHelp: (section?: string) => void sendMessage({ type: 'open-help', section }).catch(() => {}),
 
   async screenshot(id: number): Promise<string | null> {
     try {

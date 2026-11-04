@@ -1,26 +1,44 @@
-// Background service worker: the only part that talks to the review server.
-// Content scripts go through here, so the page's CSP and CORS never get in the way.
-import { DEFAULT_PORT, pageKey, type Comment, type ExtensionToServer, type Rect, type ServerToExtension, type Viewport } from '@brm/shared';
+// Background service worker. Owns all review data (IndexedDB) and connects to the
+// MCP server that Claude Code starts (npx browser-review-mcp), which listens on
+// ws://127.0.0.1:4777. Claude's tool calls arrive here as "call" messages.
+import {
+  DEFAULT_PORT,
+  pageKey,
+  type BridgeCalls,
+  type BridgeMethod,
+  type Comment,
+  type FromExtension,
+  type Rect,
+  type ToExtension,
+  type Viewport,
+} from '@brm/shared';
 import type {
-  ApiResponse,
   CaptureResponse,
   ContentRequest,
   OverlayCommand,
   PortEvent,
   PrepareCaptureResponse,
   ScreenshotDataResponse,
+  StatusResponse,
+  StoreOps,
+  StoreResponse,
   TabRequest,
 } from './messages.ts';
 import { isLocalUrl } from './local.ts';
+import { IdbDb } from './idb.ts';
+import { Store } from './store.ts';
 
-const BASE = `http://127.0.0.1:${DEFAULT_PORT}`;
 const WS_URL = `ws://127.0.0.1:${DEFAULT_PORT}/ws`;
 const LOCAL_TABS = ['http://localhost/*', 'http://127.0.0.1/*'];
+const VERSION = chrome.runtime.getManifest().version;
 
-// ---------- WebSocket to the server ----------
+const store = new Store(new IdbDb());
+
+// ---------- connection to Claude Code (the MCP server) ----------
 
 let ws: WebSocket | null = null;
 let connected = false;
+let mcpVersion: string | null = null;
 let retryMs = 1000;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 const ports = new Set<chrome.runtime.Port>();
@@ -28,9 +46,8 @@ const ports = new Set<chrome.runtime.Port>();
 function setConnected(value: boolean): void {
   if (connected === value) return;
   connected = value;
+  if (!value) mcpVersion = null;
   broadcast({ type: 'status', connected });
-  void chrome.action.setBadgeText({ text: connected ? '' : '!' });
-  void chrome.action.setBadgeBackgroundColor({ color: '#8a8f98' });
 }
 
 function connect(): void {
@@ -43,54 +60,91 @@ function connect(): void {
   ws = socket;
   socket.onopen = () => {
     retryMs = 1000;
+    send({ type: 'hello', version: VERSION });
     setConnected(true);
   };
   socket.onmessage = (ev) => {
-    let msg: ServerToExtension;
+    let msg: ToExtension;
     try {
-      msg = JSON.parse(String(ev.data)) as ServerToExtension;
+      msg = JSON.parse(String(ev.data)) as ToExtension;
     } catch {
       return;
     }
-    void onServerMessage(msg);
+    void onBridgeMessage(msg);
   };
   socket.onclose = () => {
     if (ws === socket) ws = null;
     setConnected(false);
+    // Claude Code starts the MCP server with the session, so it comes and goes. Keep trying.
     retryTimer = setTimeout(connect, retryMs);
-    retryMs = Math.min(retryMs * 2, 10_000);
+    retryMs = Math.min(retryMs * 2, 5_000);
   };
   socket.onerror = () => socket.close();
 }
 
-function send(msg: ExtensionToServer): void {
+function send(msg: FromExtension): void {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
-async function onServerMessage(msg: ServerToExtension): Promise<void> {
+async function onBridgeMessage(msg: ToExtension): Promise<void> {
   switch (msg.type) {
     case 'ping':
       send({ type: 'pong' });
       break;
-    case 'comments-changed':
-      broadcast({ type: 'comments-changed', origin: msg.origin });
+    case 'hello':
+      mcpVersion = msg.version;
       break;
-    case 'capture-request':
+    case 'call':
       try {
-        const res = await captureForComment(msg.comment);
-        send({ type: 'capture-result', requestId: msg.requestId, ok: true, ...res });
+        const data = await handleCall(msg.method, msg.params);
+        send({ type: 'result', id: msg.id, ok: true, data });
       } catch (err) {
-        send({
-          type: 'capture-result',
-          requestId: msg.requestId,
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        send({ type: 'result', id: msg.id, ok: false, error: err instanceof Error ? err.message : String(err) });
       }
       break;
-    case 'hello':
-      break;
   }
+}
+
+/** One tool call from Claude. */
+async function handleCall(method: BridgeMethod, params: unknown): Promise<unknown> {
+  const call = <M extends BridgeMethod>(_m: M) => params as BridgeCalls[M]['params'];
+  switch (method) {
+    case 'list': {
+      const p = call('list');
+      return store.list({ origin: p.origin, statuses: p.statuses });
+    }
+    case 'get':
+      return store.mustGet(call('get').id);
+    case 'screenshot': {
+      const p = call('screenshot');
+      const meta = await store.latestScreenshot(p.id, p.kind, p.which === 'initial' ? 'initial' : undefined);
+      const dataUrl = meta ? await store.readScreenshot(meta.id) : null;
+      return meta && dataUrl ? ({ meta, dataUrl } satisfies BridgeCalls['screenshot']['result']) : null;
+    }
+    case 'capture': {
+      const c = await store.mustGet(call('capture').id);
+      const shot = await captureForComment(c);
+      await store.addScreenshot(c.id, 'page', 'capture', shot.page);
+      if (shot.element) await store.addScreenshot(c.id, 'element', 'capture', shot.element);
+      return { comment: c, ...shot } satisfies BridgeCalls['capture']['result'];
+    }
+    case 'start_work':
+      return changed(await store.startWork(call('start_work').id));
+    case 'reply': {
+      const p = call('reply');
+      return changed(await store.addMessage(p.id, 'claude', p.message));
+    }
+    case 'submit_solution': {
+      const p = call('submit_solution');
+      return changed(await store.submitSolution(p.id, p.note, p.files));
+    }
+  }
+}
+
+/** Tells every overlay on that site to reload its comments. */
+function changed<T extends Comment | { origin: string }>(c: T): T {
+  broadcast({ type: 'comments-changed', origin: c.origin });
+  return c;
 }
 
 function broadcast(ev: PortEvent): void {
@@ -107,10 +161,19 @@ function broadcast(ev: PortEvent): void {
 chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(() => connect());
 chrome.runtime.onStartup.addListener(() => connect());
-chrome.runtime.onInstalled.addListener(() => connect());
+chrome.runtime.onInstalled.addListener((details) => {
+  connect();
+  if (details.reason === 'install') openHelp();
+});
 connect();
 
-// ---------- content script connections ----------
+// ---------- help page ----------
+
+function openHelp(section?: string): void {
+  void chrome.tabs.create({ url: chrome.runtime.getURL(`help.html${section ? `#${section}` : ''}`) });
+}
+
+// ---------- requests from the overlay and extension pages ----------
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'brm') return;
@@ -121,8 +184,11 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.runtime.onMessage.addListener((req: ContentRequest, sender, sendResponse) => {
-  if (req.type === 'api') {
-    void callApi(req.method, req.path, req.body).then(sendResponse);
+  if (req.type === 'store') {
+    void runStoreOp(req.op, req.args)
+      .then((data): StoreResponse => ({ ok: true, data }))
+      .catch((err: unknown): StoreResponse => ({ ok: false, error: err instanceof Error ? err.message : String(err) }))
+      .then(sendResponse);
     return true;
   }
   if (req.type === 'capture') {
@@ -138,51 +204,47 @@ chrome.runtime.onMessage.addListener((req: ContentRequest, sender, sendResponse)
     return true;
   }
   if (req.type === 'screenshot-data') {
-    void screenshotData(req.id).then(sendResponse);
+    void store
+      .readScreenshot(req.id)
+      .then((dataUrl): ScreenshotDataResponse => (dataUrl ? { ok: true, dataUrl } : { ok: false, error: 'Not found.' }))
+      .then(sendResponse);
     return true;
+  }
+  if (req.type === 'open-help') {
+    openHelp(req.section);
+    return false;
+  }
+  if (req.type === 'status') {
+    connect();
+    sendResponse({ claude: connected, mcpVersion, version: VERSION } satisfies StatusResponse);
+    return false;
   }
   return false;
 });
 
-// ---------- API proxy with an offline cache for comment lists ----------
-
-async function callApi(method: string, path: string, body?: unknown): Promise<ApiResponse> {
-  const cacheKey = method === 'GET' && path.startsWith('/api/comments?') ? `cache:${path}` : null;
-  try {
-    const res = await fetch(BASE + path, {
-      method,
-      headers: body === undefined ? {} : { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) {
-      const error = (data as { error?: string } | null)?.error ?? `HTTP ${res.status}`;
-      return { ok: false, status: res.status, error, offline: false };
+async function runStoreOp(op: keyof StoreOps, args: unknown): Promise<unknown> {
+  const a = <K extends keyof StoreOps>(_k: K) => args as StoreOps[K]['args'];
+  switch (op) {
+    case 'list':
+      return store.list({ origin: a('list').origin });
+    case 'create':
+      return changed(await store.create(a('create')));
+    case 'reply': {
+      const p = a('reply');
+      return changed(await store.addMessage(p.id, 'user', p.body));
     }
-    if (cacheKey) await chrome.storage.local.set({ [cacheKey]: data });
-    return { ok: true, data };
-  } catch {
-    connect();
-    if (cacheKey) {
-      const cached = (await chrome.storage.local.get(cacheKey))[cacheKey];
-      if (cached !== undefined) return { ok: true, data: cached, offline: true };
+    case 'accept':
+      return changed(await store.accept(a('accept').id));
+    case 'reopen': {
+      const p = a('reopen');
+      return changed(await store.reopen(p.id, p.body));
     }
-    return {
-      ok: false,
-      status: 0,
-      error: 'The review server is not running. Start it with: pnpm server',
-      offline: true,
-    };
-  }
-}
-
-async function screenshotData(id: number): Promise<ScreenshotDataResponse> {
-  try {
-    const res = await fetch(`${BASE}/api/screenshots/${id}`);
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    return { ok: true, dataUrl: toDataUrl(new Uint8Array(await res.arrayBuffer())) };
-  } catch (err) {
-    return { ok: false, error: String(err) };
+    case 'delete': {
+      const c = await store.mustGet(a('delete').id);
+      await store.delete(c.id);
+      changed(c);
+      return null;
+    }
   }
 }
 
