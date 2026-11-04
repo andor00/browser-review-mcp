@@ -15,9 +15,15 @@ interface Entry {
   resolve: () => Element | null;
 }
 
+interface TextEdit {
+  node: Text;
+  before: string;
+  after: string;
+}
+
 interface Applied {
   el: Element;
-  texts: { node: Text; before: string; after: string }[];
+  texts: TextEdit[];
 }
 
 /** Non-empty text nodes inside an element, in document order. Edits refer to them by index. */
@@ -53,6 +59,7 @@ export class Previews {
 
   constructor() {
     this.#observer = new MutationObserver((records) => {
+      this.#release(records);
       if (records.every((r) => isOurs(r.target instanceof Element ? r.target : r.target.parentElement))) return;
       this.#schedule();
     });
@@ -103,9 +110,12 @@ export class Previews {
   }
 
   apply(): void {
+    this.#release(this.#observer.takeRecords());
     const wanted = this.#suspended ? [] : [...this.#entries.values()];
     const next = new Map<string, Applied>();
     const rules: string[] = [];
+    const ours = new Map<Text, TextEdit>();
+    for (const a of this.#applied.values()) for (const t of a.texts) ours.set(t.node, t);
 
     for (const entry of wanted) {
       const el = entry.resolve();
@@ -122,7 +132,7 @@ export class Previews {
       } else {
         const css = importantCss(entry.change.css);
         if (css) rules.push(`${sel} { ${css}; }`);
-        applied.texts = this.#applyTexts(el, entry.change.texts);
+        applied.texts = this.#applyTexts(el, entry.change.texts, ours);
       }
       next.set(entry.key, applied);
     }
@@ -142,19 +152,41 @@ export class Previews {
     }
     this.#applied = next;
     this.#writeStyle(rules.join('\n'));
+    // Drop the records of our own writes, so they don't count as the app's.
+    this.#observer.takeRecords();
   }
 
-  #applyTexts(el: Element, changes: TextChange[]): Applied['texts'] {
+  /**
+   * The app wrote a text node that shows our edit. If it wrote the edited text
+   * itself, the code now does what the edit asked: the node is the app's again,
+   * so turning the preview off must not put the old text back.
+   */
+  #release(records: MutationRecord[]): void {
+    for (const r of records) {
+      if (r.type !== 'characterData') continue;
+      for (const a of this.#applied.values()) {
+        a.texts = a.texts.filter((t) => !(t.node === r.target && t.node.nodeValue === t.after));
+      }
+    }
+  }
+
+  /** `ours`: the text nodes our previews changed so far, with what they changed. */
+  #applyTexts(el: Element, changes: TextChange[], ours: Map<Text, TextEdit>): TextEdit[] {
     if (!changes.length) return [];
     const nodes = textNodesOf(el, 200);
-    const out: Applied['texts'] = [];
+    const out: TextEdit[] = [];
     for (const ch of changes) {
       const node = nodes[ch.index];
       if (!node) continue;
-      // Only touch the node if it still holds the text the edit started from
-      // (or our edit). If the app changed it, the code has moved on.
-      if (node.nodeValue === ch.before) node.nodeValue = ch.after;
-      if (node.nodeValue === ch.after) out.push({ node, before: ch.before, after: ch.after });
+      // What the app has in the node, seen through a preview we already show.
+      const prev = ours.get(node);
+      const appText = prev && node.nodeValue === prev.after ? prev.before : node.nodeValue;
+      // Only touch the node if the app still has the text the edit started
+      // from. If it has something else (the fix itself, say), the code has
+      // moved on and the node is not ours to change or restore.
+      if (appText !== ch.before) continue;
+      if (node.nodeValue !== ch.after) node.nodeValue = ch.after;
+      out.push({ node, before: ch.before, after: ch.after });
     }
     return out;
   }
@@ -174,6 +206,6 @@ export class Previews {
   }
 }
 
-function restoreText(t: { node: Text; before: string; after: string }): void {
+function restoreText(t: TextEdit): void {
   if (t.node.nodeValue === t.after) t.node.nodeValue = t.before;
 }
