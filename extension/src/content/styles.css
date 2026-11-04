@@ -145,6 +145,22 @@ code {
   flex-wrap: wrap;
 }
 
+.brm-actions > .brm-check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--brm-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.brm-check input {
+  margin: 0;
+  accent-color: var(--brm-accent);
+}
+
 .brm-actions > .brm-dim {
   margin-right: auto;
   font-size: 11px;
@@ -212,6 +228,24 @@ code {
 
 .brm-count.st-review_ready {
   background: var(--brm-review);
+}
+
+/* A new thread was added: the count pops once so you see it went up. */
+.brm-count.is-bumped {
+  animation: brm-bump 0.6s ease-out;
+}
+
+@keyframes brm-bump {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.5);
+    box-shadow: 0 0 0 4px var(--brm-accent-soft);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .brm-dot {
@@ -361,8 +395,30 @@ code {
 }
 
 .brm-composer {
+  display: flex;
+  flex-direction: column;
   max-height: calc(100vh - 16px);
+  min-height: 180px;
   overflow: auto;
+  /* Drag the bottom-right corner to make it taller; the size is remembered. */
+  resize: vertical;
+}
+
+.brm-composer > * {
+  flex: none;
+}
+
+/* The comment box takes the extra height when the popover is made taller. */
+.brm-composer > .brm-grow {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.brm-grow textarea {
+  flex: 1;
+  min-height: 64px;
+  resize: none;
 }
 
 .brm-composer-head {
@@ -469,10 +525,38 @@ code {
   box-shadow: -8px 0 28px rgba(20, 20, 40, 0.12);
 }
 
+/* Drag handle on the left edge: a few pixels wide, a line on hover. */
+.brm-side-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.brm-side-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.brm-side-resize:hover::after,
+.brm-side-resize.is-dragging::after {
+  background: var(--brm-accent);
+}
+
 /* Keep the toolbar and the page composer next to the sidebar, not under it. */
 .brm-sidebar ~ .brm-toolbar,
 .brm-sidebar ~ .brm-composer.is-page {
-  right: 396px !important;
+  right: calc(var(--brm-side-w, 380px) + 16px) !important;
 }
 
 .brm-side-head {

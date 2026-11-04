@@ -1,5 +1,5 @@
 // The popover to write a comment, remove an element, or edit it.
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { pageKey, type Change, type Comment, type Kind, type TextChange } from '@brm/shared';
 import { bridge } from '../bridge.ts';
 import { withCapture } from '../capture.ts';
@@ -17,11 +17,17 @@ interface Props {
   /** Shown above the form, e.g. when a restored element could not be found. */
   notice?: string;
   previews: Previews;
-  onCreated: (c: Comment) => Promise<void>;
+  /** `openThread`: the user wants to see the new thread in the sidebar. */
+  onCreated: (c: Comment, openThread: boolean) => Promise<void>;
   onCancel: () => void;
 }
 
 const WIDTH = 340;
+/** Height the user dragged the popover to, shared by all sites. */
+const HEIGHT_KEY = 'composerHeight';
+const MIN_HEIGHT = 180;
+/** Open the thread in the sidebar after sending. Off: only the Threads count goes up. */
+const OPEN_THREAD_KEY = 'openThreadAfterSend';
 
 export function Composer({ el, initialKind, draft, notice, previews, onCreated, onCancel }: Props) {
   const [kind, setKind] = useState<Kind>(el ? (draft?.kind ?? initialKind) : 'comment');
@@ -35,6 +41,14 @@ export function Composer({ el, initialKind, draft, notice, previews, onCreated, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const [openThread, setOpenThread] = useState(false);
+  useEffect(() => {
+    void chrome.storage.local.get(OPEN_THREAD_KEY).then((r) => setOpenThread(r[OPEN_THREAD_KEY] === true));
+  }, []);
+  const toggleOpenThread = (value: boolean) => {
+    setOpenThread(value);
+    void chrome.storage.local.set({ [OPEN_THREAD_KEY]: value });
+  };
 
   const textChanges = useMemo<TextChange[]>(
     () =>
@@ -107,7 +121,7 @@ export function Composer({ el, initialKind, draft, notice, previews, onCreated, 
         body,
         screenshots,
       });
-      await onCreated(created);
+      await onCreated(created, openThread);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSaving(false);
@@ -124,24 +138,90 @@ export function Composer({ el, initialKind, draft, notice, previews, onCreated, 
     }
   }
 
+  // ---------- size: the user can drag it taller (or shorter); we remember that ----------
+
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [userHeight, setUserHeight] = useState<number | null>(null);
+  const userHeightRef = useRef(userHeight);
+  userHeightRef.current = userHeight;
+  useEffect(() => {
+    void chrome.storage.local.get(HEIGHT_KEY).then((r) => {
+      const h = r[HEIGHT_KEY];
+      if (typeof h === 'number' && h >= MIN_HEIGHT) setUserHeight(h);
+    });
+  }, []);
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card) return;
+    let timer = 0;
+    // The browser writes an inline height while the resize handle is dragged.
+    const ro = new ResizeObserver(() => {
+      const dragged = parseFloat(card.style.height);
+      if (!dragged || Math.abs(dragged - (userHeightRef.current ?? 0)) < 1) return;
+      userHeightRef.current = dragged;
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setUserHeight(dragged);
+        void chrome.storage.local.set({ [HEIGHT_KEY]: Math.round(dragged) });
+      }, 200);
+    });
+    ro.observe(card);
+    return () => {
+      ro.disconnect();
+      clearTimeout(timer);
+    };
+  }, []);
+  // Height used to decide where it goes. Measured once, then fixed, so resizing
+  // only moves the bottom edge (the handle stays under the mouse).
+  const placeHeight = useRef<number | null>(null);
+  const [, relayout] = useState(0);
+  useLayoutEffect(() => {
+    if (placeHeight.current === null && cardRef.current) {
+      placeHeight.current = cardRef.current.offsetHeight;
+      relayout((n) => n + 1);
+    }
+  });
+
   // Place below the element, or above when there is no room, inside the viewport.
+  // Always positioned from the top, so the resize handle grows it downward.
   const style = useMemo(() => {
+    const h = Math.max(MIN_HEIGHT, userHeight ?? placeHeight.current ?? 260);
     const r = anchor.current;
-    if (!r) return px({ right: 16, bottom: 72, width: WIDTH });
-    const left = Math.max(8, Math.min(innerWidth - WIDTH - 8, r.left));
-    const below = r.bottom + 10;
-    if (below + 260 < innerHeight) return px({ left, top: below, width: WIDTH });
-    const above = r.top - 10;
-    if (above > 260) return px({ left, bottom: innerHeight - above, width: WIDTH });
-    return px({ left, top: Math.max(8, innerHeight / 2 - 150), width: WIDTH });
-  }, [tracked?.x, tracked?.y, tracked?.width, tracked?.height]);
+    let left: number | undefined;
+    let right: number | undefined;
+    let top: number;
+    if (!r) {
+      right = 16;
+      top = Math.max(8, innerHeight - 72 - h);
+    } else {
+      left = Math.max(8, Math.min(innerWidth - WIDTH - 8, r.left));
+      const below = r.bottom + 10;
+      const above = r.top - 10 - h;
+      if (below + h < innerHeight - 8) top = below;
+      else if (above >= 8) top = above;
+      else top = Math.max(8, innerHeight / 2 - h / 2);
+    }
+    return px({
+      left,
+      right,
+      top,
+      width: WIDTH,
+      height: userHeight ?? undefined,
+      maxHeight: Math.max(MIN_HEIGHT, innerHeight - top - 8),
+    });
+  }, [tracked?.x, tracked?.y, tracked?.width, tracked?.height, userHeight, placeHeight.current]);
 
   return (
     <>
       {tracked && kind !== 'remove' && (
         <div class="brm-selected" style={px({ left: tracked.x, top: tracked.y, width: tracked.width, height: tracked.height })} />
       )}
-      <div class={`brm-ui brm-card brm-composer ${el ? '' : 'is-page'}`} style={style} onKeyDown={onKeyDown}>
+      <div
+        ref={cardRef}
+        class={`brm-ui brm-card brm-composer ${el ? '' : 'is-page'}`}
+        style={style}
+        onKeyDown={onKeyDown}
+      >
         <div class="brm-composer-head">
           <span class="brm-target-label" title={label}>
             {label}
@@ -204,7 +284,7 @@ export function Composer({ el, initialKind, draft, notice, previews, onCreated, 
           </div>
         )}
 
-        <label class="brm-field">
+        <label class="brm-field brm-grow">
           <span class="brm-field-label">
             {kind === 'comment' ? 'Comment' : kind === 'remove' ? 'Why? (optional)' : 'Note (optional)'}
           </span>
@@ -220,11 +300,14 @@ export function Composer({ el, initialKind, draft, notice, previews, onCreated, 
         {error && <p class="brm-error">{error}</p>}
 
         <div class="brm-actions">
-          <span class="brm-dim">Ctrl+Enter</span>
+          <label class="brm-check" title="Show the new thread in the sidebar after sending">
+            <input type="checkbox" checked={openThread} onChange={(e) => toggleOpenThread((e.target as HTMLInputElement).checked)} />
+            Open thread
+          </label>
           <button class="brm-btn" onClick={onCancel} disabled={saving}>
             Cancel
           </button>
-          <button class="brm-btn brm-primary" onClick={() => void save()} disabled={saving}>
+          <button class="brm-btn brm-primary" title="Ctrl+Enter" onClick={() => void save()} disabled={saving}>
             {saving ? 'Saving' : kind === 'comment' ? 'Add comment' : kind === 'remove' ? 'Remove element' : 'Save edit'}
           </button>
         </div>

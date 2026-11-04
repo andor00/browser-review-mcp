@@ -23,6 +23,7 @@ the first holds the port (hub), the rest connect to it (/peer).
 
 ```sh
 pnpm build           # extension/dist, extension/dist-firefox, server/dist/cli.js
+pnpm dev             # watch + hot reload of extension/dist (dev:firefox: dist-firefox)
 pnpm test            # all tests
 pnpm typecheck       # all packages
 pnpm package         # release/browser-review-<version>-chrome.zip and -firefox.zip

@@ -33,6 +33,69 @@ function time(iso: string): string {
     : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
+/** Width the user dragged the sidebar to, shared by all sites. */
+const WIDTH_KEY = 'sidebarWidth';
+const DEFAULT_WIDTH = 380;
+const MIN_WIDTH = 300;
+/** Leave at least this much of the page visible. */
+const PAGE_MIN = 200;
+
+const clampWidth = (w: number) => Math.round(Math.max(MIN_WIDTH, Math.min(w, innerWidth - PAGE_MIN)));
+
+/**
+ * Drag the left edge to resize; double-click it for the default width. The width
+ * goes on the overlay root as --brm-side-w, so the toolbar and page composer move along.
+ */
+function useSidebarWidth(ref: { current: HTMLElement | null }) {
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  useEffect(() => {
+    void chrome.storage.local.get(WIDTH_KEY).then((r) => {
+      if (typeof r[WIDTH_KEY] === 'number') setWidth(r[WIDTH_KEY]);
+    });
+  }, []);
+  // Keep it inside the window when the window gets smaller.
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const onResize = () => rerender((n) => n + 1);
+    addEventListener('resize', onResize);
+    return () => removeEventListener('resize', onResize);
+  }, []);
+  const shown = clampWidth(width);
+  useEffect(() => {
+    const root = ref.current?.parentElement;
+    root?.style.setProperty('--brm-side-w', `${shown}px`);
+    return () => root?.style.removeProperty('--brm-side-w');
+  }, [shown]);
+
+  const save = (w: number) => {
+    setWidth(w);
+    void chrome.storage.local.set({ [WIDTH_KEY]: w });
+  };
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const handle = e.currentTarget as HTMLElement;
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add('is-dragging');
+    let w = shown;
+    const move = (ev: PointerEvent) => {
+      w = clampWidth(innerWidth - ev.clientX);
+      setWidth(w);
+    };
+    const up = () => {
+      handle.classList.remove('is-dragging');
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      save(w);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  };
+  return { width: shown, onPointerDown, reset: () => save(DEFAULT_WIDTH) };
+}
+
 const ORDER: Record<Status, number> = { review_ready: 0, in_progress: 1, open: 2, accepted: 3 };
 
 export function Sidebar({ comments, path, connected, focusId, onClose, onHover, onGoTo, onChanged }: Props) {
@@ -41,6 +104,8 @@ export function Sidebar({ comments, path, connected, focusId, onClose, onHover, 
   const [expanded, setExpanded] = useState<number | null>(() => focusId ?? expandedDraft.get());
 
   useEffect(() => expandedDraft.set(expanded), [expanded]);
+  const asideRef = useRef<HTMLElement>(null);
+  const size = useSidebarWidth(asideRef);
 
   useEffect(() => {
     if (focusId === null) return;
@@ -57,7 +122,13 @@ export function Sidebar({ comments, path, connected, focusId, onClose, onHover, 
     .sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.updatedAt.localeCompare(a.updatedAt));
 
   return (
-    <aside class="brm-ui brm-sidebar" aria-label="Review threads">
+    <aside ref={asideRef} class="brm-ui brm-sidebar" style={{ width: `${size.width}px` }} aria-label="Review threads">
+      <div
+        class="brm-side-resize"
+        title="Drag to resize, double-click for the default width"
+        onPointerDown={size.onPointerDown}
+        onDblClick={size.reset}
+      />
       <header class="brm-side-head">
         <strong>Review</strong>
         <div class="brm-seg">

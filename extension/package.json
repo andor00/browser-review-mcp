@@ -1,6 +1,6 @@
 {
   "name": "@brm/extension",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -10,6 +10,7 @@
   "scripts": {
     "build": "node build.ts",
     "dev": "node build.ts --watch",
+    "dev:firefox": "node build.ts --watch --firefox",
     "build:firefox": "node build.ts --firefox",
     "package": "node build.ts --zip && node build.ts --zip --firefox",
     "test": "node --test \"src/**/*.test.ts\"",

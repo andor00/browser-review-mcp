@@ -1,6 +1,6 @@
 {
   "name": "browser-review-mcp",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -13,7 +13,8 @@
     "build:extension": "pnpm --dir extension build",
     "build:firefox": "pnpm --dir extension build:firefox",
     "build:mcp": "pnpm --dir server build",
-    "dev:extension": "pnpm --dir extension dev",
+    "dev": "pnpm --dir extension dev",
+    "dev:firefox": "pnpm --dir extension dev:firefox",
     "package": "pnpm --dir extension package",
     "publish:mcp": "pnpm --dir server publish",
     "typecheck": "pnpm -r typecheck",

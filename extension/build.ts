@@ -1,8 +1,11 @@
-// Builds the extension. Run with `node build.ts` (or `--watch`).
+// Builds the extension. Run with `node build.ts`.
 //   (no flag)   Chrome / Brave / Edge into dist/
 //   --firefox   Firefox into dist-firefox/ (same code, Firefox manifest)
 //   --zip       release build (no sourcemaps), zipped into release/
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+//   --watch     rebuild on every change, and hot reload: the extension reloads
+//               itself and the localhost tabs (see src/dev-reload.ts)
+import { copyFileSync, mkdirSync, readFileSync, rmSync, watch as watchDir, writeFileSync } from 'node:fs';
+import { createServer, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
@@ -18,13 +21,21 @@ const dist = join(root, firefox ? 'dist-firefox' : 'dist');
 /** Add-on ID on addons.mozilla.org. Keep it fixed: Firefox keys the add-on's data (IndexedDB) to it. */
 const GECKO_ID = 'browser-review@andor00';
 
+/** Hot reload server of `--watch`, one port per browser so both can run. Dev builds only. */
+const DEV_RELOAD_PORT = firefox ? 4779 : 4778;
+
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(join(dist, 'icons'), { recursive: true });
-for (const file of ['notice.html', 'help.html']) copyFileSync(join(root, 'static', file), join(dist, file));
-copyFileSync(join(root, '..', 'LICENSE'), join(dist, 'LICENSE'));
-const manifest = JSON.parse(readFileSync(join(root, 'static', 'manifest.json'), 'utf8')) as Record<string, unknown>;
-writeFileSync(join(dist, 'manifest.json'), `${JSON.stringify(firefox ? firefoxManifest(manifest) : manifest, null, 2)}\n`);
+copyStatic();
 for (const size of [16, 48, 128]) writeFileSync(join(dist, 'icons', `${size}.png`), icon(size));
+
+/** The files in static/ that are copied as they are (the manifest per browser). */
+function copyStatic(): void {
+  for (const file of ['notice.html', 'help.html']) copyFileSync(join(root, 'static', file), join(dist, file));
+  copyFileSync(join(root, '..', 'LICENSE'), join(dist, 'LICENSE'));
+  const manifest = JSON.parse(readFileSync(join(root, 'static', 'manifest.json'), 'utf8')) as Record<string, unknown>;
+  writeFileSync(join(dist, 'manifest.json'), `${JSON.stringify(firefox ? firefoxManifest(manifest) : manifest, null, 2)}\n`);
+}
 
 const options: esbuild.BuildOptions = {
   entryPoints: {
@@ -42,15 +53,42 @@ const options: esbuild.BuildOptions = {
   jsxImportSource: 'preact',
   loader: { '.css': 'text' },
   // Firefox's own `browser` namespace is the one with promises everywhere; its `chrome` is a compatibility layer.
-  define: firefox ? { chrome: 'browser' } : {},
+  define: {
+    ...(firefox ? { chrome: 'browser' } : {}),
+    // Release and normal builds leave the hot reload code out entirely.
+    __DEV_RELOAD__: watch ? JSON.stringify(`http://127.0.0.1:${DEV_RELOAD_PORT}/build`) : 'null',
+  },
   sourcemap: release ? false : 'linked',
   logLevel: 'info',
 };
 
 if (watch) {
-  const ctx = await esbuild.context(options);
+  const reload = devReloadServer();
+  const ctx = await esbuild.context({ ...options, plugins: [reload.plugin] });
   await ctx.watch();
-  console.log('Watching. Reload the extension in brave://extensions after a change.');
+  // esbuild only watches the code it bundles; static/ changes trigger a rebuild too.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  watchDir(join(root, 'static'), () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      try {
+        copyStatic();
+        void ctx.rebuild();
+      } catch (err) {
+        console.error(err);
+      }
+    }, 100);
+  });
+  const cli = join(root, '..', 'server', 'src', 'cli.ts');
+  console.log(`
+Watching. Load ${dist} once (Load unpacked); after that the extension
+and your localhost tabs reload by themselves on every change.
+
+To let Claude Code use the MCP server from this repo (once, then restart Claude Code):
+
+  claude mcp remove --scope user browser-review
+  claude mcp add --scope user browser-review -- node ${cli}
+`);
 } else {
   await esbuild.build(options);
   if (release) {
@@ -62,6 +100,62 @@ if (watch) {
     writeFileSync(out, zip(filesIn(dist)));
     console.log(`\nPackaged ${out}`);
   }
+}
+
+/**
+ * Hot reload: a build id the dev build of the extension long-polls on
+ * 127.0.0.1. When it changes, the extension reloads itself (src/dev-reload.ts).
+ * It only tells the build id; nothing else is served.
+ */
+function devReloadServer(): { plugin: esbuild.Plugin } {
+  const session = Date.now().toString(36);
+  let builds = 0;
+  let id = `${session}-0`;
+  const waiting = new Set<ServerResponse>();
+  const send = (res: ServerResponse) => {
+    // Firefox fetches without host permission (it is optional there), so allow it.
+    res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
+    res.end(id);
+  };
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (url.pathname !== '/build') {
+      res.writeHead(404).end();
+      return;
+    }
+    // Answer at once when the caller is behind; otherwise wait for the next build.
+    if (url.searchParams.get('since') !== id) return send(res);
+    waiting.add(res);
+    const timer = setTimeout(() => {
+      waiting.delete(res);
+      send(res);
+    }, 20_000);
+    res.on('close', () => {
+      clearTimeout(timer);
+      waiting.delete(res);
+    });
+  });
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    console.error(
+      err.code === 'EADDRINUSE'
+        ? `Hot reload is off: port ${DEV_RELOAD_PORT} is in use (another watch running?). Builds still run.`
+        : `Hot reload server: ${err.message}`,
+    );
+  });
+  server.listen(DEV_RELOAD_PORT, '127.0.0.1');
+  return {
+    plugin: {
+      name: 'dev-reload',
+      setup(build) {
+        build.onEnd((result) => {
+          if (result.errors.length) return; // keep the last good build running
+          id = `${session}-${++builds}`;
+          for (const res of waiting) send(res);
+          waiting.clear();
+        });
+      },
+    },
+  };
 }
 
 /**

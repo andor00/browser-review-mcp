@@ -127,6 +127,14 @@
         font: inherit;
         cursor: pointer;
       }
+      select {
+        font: inherit;
+        padding: 3px 6px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--bg);
+        color: inherit;
+      }
       .copy {
         flex: none;
         padding: 0 16px;
@@ -321,6 +329,7 @@
               <li><strong>Remove</strong>: the element disappears right away (preview), Claude removes it in the code.</li>
               <li><strong>Edit</strong>: change its texts or add CSS with a live preview, Claude makes the same change.</li>
             </ul>
+            After sending, the <strong>Threads</strong> count goes up; tick <strong>Open thread</strong> in the box to see the new thread in the sidebar instead (it remembers your choice). Need more room to write? Drag the box's bottom-right corner; it remembers the size. The Threads sidebar resizes the same way, by dragging its left edge.
           </li>
           <li>Or write a <strong>Page comment</strong> about the whole page.</li>
         </ol>
@@ -365,12 +374,19 @@
           </thead>
           <tbody id="shortcut-rows"></tbody>
           <tbody>
+            <tr>
+              <td>Pick an element while you hold a key; release it to stop.<br /><span class="dim">The Pick element button and shortcut keep the picker on until you pick or press Esc.</span></td>
+              <td><select id="hold-key" aria-label="Hold to pick"></select></td>
+            </tr>
             <tr><td>Pick the parent element while picking</td><td><kbd>↑</kbd> or mouse wheel up (<kbd>↓</kbd> goes back)</td></tr>
             <tr><td>Save a comment</td><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td></tr>
             <tr><td>Cancel</td><td><kbd>Esc</kbd></td></tr>
           </tbody>
         </table>
-        <p><button class="link-btn" id="edit-shortcuts">Change shortcuts</button> <span id="shortcuts-where" class="dim"></span></p>
+        <p>
+          The shortcuts above belong to the browser, so you change them there:
+          <button class="link-btn" id="edit-shortcuts">Change shortcuts</button> <span id="shortcuts-where" class="dim"></span>
+        </p>
       </section>
 
       <section id="trouble">

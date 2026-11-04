@@ -6,6 +6,8 @@ import { useTrackedRect } from '../hooks.ts';
 import { px } from '../px.ts';
 
 interface Props {
+  /** Started by holding this key (its label): releasing it stops. */
+  releaseKey?: string | null;
   onPick: (el: Element) => void;
   onCancel: () => void;
 }
@@ -22,7 +24,7 @@ function ancestry(el: Element): Element[] {
   return out;
 }
 
-export function Picker({ onPick, onCancel }: Props) {
+export function Picker({ releaseKey, onPick, onCancel }: Props) {
   const [chain, setChain] = useState<Element[]>([]);
   const [depth, setDepth] = useState(0);
   const current = chain[Math.min(depth, chain.length - 1)] ?? null;
@@ -112,7 +114,8 @@ export function Picker({ onPick, onCancel }: Props) {
   return (
     <>
       <div class="brm-ui brm-picker-hint">
-        Click an element. Scroll or arrow up/down for parent/child. Esc to cancel.
+        Click an element. Scroll or arrow up/down for parent/child.{' '}
+        {releaseKey ? `Release ${releaseKey} to stop.` : 'Esc to cancel.'}
       </div>
       {rect && (
         <>

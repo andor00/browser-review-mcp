@@ -7,6 +7,7 @@ import { useHref } from './hooks.ts';
 import { composerDraft, type ComposerDraft } from './drafts.ts';
 import type { Previews } from './previews.ts';
 import { findTarget } from './targets.ts';
+import { DEFAULT_HOLD_KEY, HOLD_KEY, HOLD_KEYS, toHoldKey, type HoldKey } from '../settings.ts';
 import { Composer } from './ui/Composer.tsx';
 import { Picker } from './ui/Picker.tsx';
 import { Outline, Pins } from './ui/Pins.tsx';
@@ -15,7 +16,8 @@ import { Toolbar } from './ui/Toolbar.tsx';
 
 type Mode =
   | { type: 'idle' }
-  | { type: 'picking' }
+  /** `held`: started by holding the hold-to-pick key; releasing it stops. */
+  | { type: 'picking'; held?: boolean }
   | { type: 'compose'; el: Element | null; kind: Kind; draft?: ComposerDraft; notice?: string };
 
 const hiddenKey = (origin: string) => `hidden:${origin}`;
@@ -120,7 +122,7 @@ export function App({ previews }: { previews: Previews }) {
         // Shortcuts also bring the overlay back when it is hidden.
         if (hiddenRef.current) setHiddenStored(false);
         if (req.command === 'pick-element') {
-          setMode((m) => (m.type === 'picking' ? { type: 'idle' } : { type: 'picking' }));
+          setMode((m) => (m.type === 'picking' && !m.held ? { type: 'idle' } : { type: 'picking' }));
         } else if (req.command === 'page-comment') {
           setMode({ type: 'compose', el: null, kind: 'comment' });
         } else {
@@ -162,6 +164,59 @@ export function App({ previews }: { previews: Previews }) {
     chrome.runtime.onMessage.addListener(onMessage);
     return () => chrome.runtime.onMessage.removeListener(onMessage);
   }, [previews, setHiddenStored, setSidebarStored]);
+
+  // ---------- hold a key (Left Alt by default) to pick, release to stop ----------
+
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const [holdKey, setHoldKey] = useState<HoldKey>(DEFAULT_HOLD_KEY);
+  useEffect(() => {
+    void chrome.storage.local.get(HOLD_KEY).then((r) => setHoldKey(toHoldKey(r[HOLD_KEY])));
+    const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === 'local' && HOLD_KEY in changes) setHoldKey(toHoldKey(changes[HOLD_KEY]?.newValue));
+    };
+    chrome.storage.onChanged.addListener(onChange);
+    return () => chrome.storage.onChanged.removeListener(onChange);
+  }, []);
+
+  useEffect(() => {
+    if (holdKey === 'off') return;
+    let timer = 0;
+    const isHeld = () => modeRef.current.type === 'picking' && modeRef.current.held === true;
+    const stop = () => {
+      clearTimeout(timer);
+      if (isHeld()) setMode({ type: 'idle' });
+    };
+    const onDown = (e: KeyboardEvent) => {
+      if (e.code === holdKey) {
+        if (e.repeat || hiddenRef.current || modeRef.current.type !== 'idle') return;
+        // Wait a moment: Alt+Shift+P and other combos press it too, and should not flash the picker.
+        timer = window.setTimeout(() => setMode({ type: 'picking', held: true }), 150);
+        return;
+      }
+      // Another key while holding it: a key combination, not a hold. The picker's own keys still work.
+      clearTimeout(timer);
+      if (isHeld() && !['ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(e.key)) setMode({ type: 'idle' });
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.code !== holdKey) return;
+      // Alt alone would otherwise focus the browser's menu (Firefox, Windows).
+      if (isHeld()) e.preventDefault();
+      stop();
+    };
+    // Alt+Tab and the like: the key comes up in another window, so stop here.
+    const onBlur = () => stop();
+    const opts = { capture: true };
+    addEventListener('keydown', onDown, opts);
+    addEventListener('keyup', onUp, opts);
+    addEventListener('blur', onBlur);
+    return () => {
+      clearTimeout(timer);
+      removeEventListener('keydown', onDown, opts);
+      removeEventListener('keyup', onUp, opts);
+      removeEventListener('blur', onBlur);
+    };
+  }, [holdKey]);
 
   // ---------- actions ----------
 
@@ -253,10 +308,12 @@ export function App({ previews }: { previews: Previews }) {
     attempt();
   }, [comments]);
 
-  const onCreated = async (c: Comment) => {
+  const onCreated = async (c: Comment, open: boolean) => {
     await load();
     setMode({ type: 'idle' });
-    openThread(c.id);
+    // By default only the Threads count goes up; the composer's "Open thread"
+    // box shows the new thread in the sidebar instead.
+    if (open) openThread(c.id);
   };
 
   if (hidden) return null;
@@ -287,6 +344,7 @@ export function App({ previews }: { previews: Previews }) {
 
       {mode.type === 'picking' && (
         <Picker
+          releaseKey={mode.held && holdKey !== 'off' ? HOLD_KEYS[holdKey] : null}
           onPick={(el) => setMode({ type: 'compose', el, kind: 'comment' })}
           onCancel={() => setMode({ type: 'idle' })}
         />
@@ -310,7 +368,7 @@ export function App({ previews }: { previews: Previews }) {
         openCount={openCount}
         reviewCount={reviewCount}
         sidebarOpen={sidebarOpen}
-        onPick={() => setMode(mode.type === 'picking' ? { type: 'idle' } : { type: 'picking' })}
+        onPick={() => setMode(mode.type === 'picking' && !mode.held ? { type: 'idle' } : { type: 'picking' })}
         onPageComment={() => setMode({ type: 'compose', el: null, kind: 'comment' })}
         onToggleSidebar={() => setSidebarStored(!sidebarOpen)}
         onHide={() => setHiddenStored(true)}

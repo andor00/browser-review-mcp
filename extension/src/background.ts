@@ -24,6 +24,7 @@ import type {
   StoreResponse,
   TabRequest,
 } from './messages.ts';
+import { startDevReload } from './dev-reload.ts';
 import { isLocalUrl } from './local.ts';
 import { IdbDb } from './idb.ts';
 import { Store } from './store.ts';
@@ -159,6 +160,9 @@ function broadcast(ev: PortEvent): void {
 
 // The service worker can be stopped by the browser. Alarms wake it up so it reconnects.
 chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
+// Only in `pnpm dev` builds (see dev-reload.ts).
+if (__DEV_RELOAD__) startDevReload(__DEV_RELOAD__, LOCAL_TABS);
+
 chrome.alarms.onAlarm.addListener(() => connect());
 chrome.runtime.onStartup.addListener(() => connect());
 chrome.runtime.onInstalled.addListener((details) => {

@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'preact/hooks';
+
 interface Props {
   connected: boolean;
   picking: boolean;
@@ -11,7 +13,24 @@ interface Props {
   onHelp: () => void;
 }
 
+/** Adds "is-bumped" for a moment whenever n goes up. */
+function useBump(n: number): boolean {
+  const prev = useRef(n);
+  const [bumped, setBumped] = useState(false);
+  useEffect(() => {
+    if (n > prev.current) {
+      setBumped(true);
+      const t = setTimeout(() => setBumped(false), 650);
+      prev.current = n;
+      return () => clearTimeout(t);
+    }
+    prev.current = n;
+  }, [n]);
+  return bumped;
+}
+
 export function Toolbar(p: Props) {
+  const openBumped = useBump(p.openCount);
   return (
     <div class="brm-ui brm-toolbar" role="toolbar" aria-label="Browser Review">
       <span
@@ -36,7 +55,7 @@ export function Toolbar(p: Props) {
       </button>
       <button class={`brm-tool ${p.sidebarOpen ? 'is-active' : ''}`} onClick={p.onToggleSidebar} title="Open or close the threads (Alt+Shift+T)">
         Threads
-        {p.openCount > 0 && <span class="brm-count">{p.openCount}</span>}
+        {p.openCount > 0 && <span class={`brm-count ${openBumped ? 'is-bumped' : ''}`}>{p.openCount}</span>}
         {p.reviewCount > 0 && <span class="brm-count st-review_ready" title="Review ready">{p.reviewCount}</span>}
       </button>
       <button class="brm-icon-btn" onClick={p.onHelp} title="Help: setup and how to use">

@@ -118,17 +118,20 @@ To remove it: `claude mcp remove --scope user browser-review`.
 |---|---|
 | Show the overlay with the Threads sidebar open (click again to hide) | the extension icon, or Alt+Shift+R |
 | Comment on an element | **Pick element** (Alt+Shift+P), click the element, write, **Add comment** |
+| Pick while holding a key | hold **Left Alt**, click the element; release Alt to stop. Change the key (or turn it off) on the help page. **Pick element** and its shortcut keep the picker on until you pick or press Esc |
 | Pick the parent element | mouse wheel up or arrow up while picking (down goes back) |
-| Remove an element | pick it, **Remove** tab, **Remove element** |
+| Remove an element | pick it, **Remove** tab, **Remove element**. It disappears |
 | Edit text and CSS | pick it, **Edit** tab, change the texts, add CSS, **Save edit** |
+| See the new thread right after sending | tick **Open thread** in the comment box (remembered). Off: only the Threads count goes up |
+| Make the comment box taller | drag its bottom-right corner; the size is remembered |
+| Make the Threads sidebar wider or narrower | drag its left edge (double-click it for the default width); the width is remembered |
 | Comment on the page | **Page comment** (Alt+Shift+C) |
 | See all threads | **Threads** (Alt+Shift+T): this page or the whole site, filtered by status |
 | Jump to a thread's element | **Go to** in the thread. On another page it opens that page first. If the element is gone, you land on the page. **Open page** always opens the page itself. |
 | Help | **?** in the toolbar or the sidebar |
+| Change the shortcuts | they are browser shortcuts: help page, **Change shortcuts** (`brave://extensions/shortcuts`; Firefox: about:addons, gear, Manage Extension Shortcuts) |
 | Save a comment | Ctrl+Enter |
 | Cancel | Esc |
-
-Change the shortcuts in `brave://extensions/shortcuts`.
 
 What you type survives a reload of your app (dev server restart, full HMR reload,
 F5): an unsent comment, removal or edit reopens on the same element with your
@@ -190,21 +193,84 @@ another takes over.
 
 Needs Node 26 (`nvm use` reads `.nvmrc`) and pnpm.
 
+### Run the extension from source (hot reload)
+
+1. Install once:
+
+   ```sh
+   pnpm install
+   ```
+
+2. Start the watch and leave it running in a terminal:
+
+   ```sh
+   pnpm dev
+   ```
+
+   It builds the extension into `extension/dist` and rebuilds on every save.
+   When it is ready it prints the folder to load and the `claude mcp add`
+   command for the MCP server in this repo (step 5), with your paths filled in.
+
+3. Load it in the browser, once:
+   1. Open `brave://extensions` (or `chrome://extensions`) and turn on
+      **Developer mode** (top right).
+   2. If a release version of Browser Review is loaded, turn it off, so you
+      don't get two overlays.
+   3. Click **Load unpacked** and pick the `extension/dist` folder of this repo.
+
+4. Open your app on `http://localhost:<port>` and work on the code. On every
+   save the extension reloads itself, then reloads your localhost tabs so they
+   get the new overlay. What you were typing in a comment box comes back.
+   Changes in `extension/static/` (manifest, help page) reload it too.
+
+5. To also use the MCP server from this repo instead of npm (no publish needed),
+   run the command `pnpm dev` printed, once, then restart Claude Code:
+
+   ```sh
+   claude mcp remove --scope user browser-review
+   claude mcp add --scope user browser-review -- node /path/to/repo/server/src/cli.ts
+   ```
+
+   Changes to the server take effect when Claude Code restarts it (`/mcp`,
+   reconnect). To go back to npm: remove it again and add it with
+   `npx -y browser-review-mcp@latest` (see Setup).
+
+Good to know:
+
+- **Stop the watch** (Ctrl+C) and nothing reloads anymore; the last build keeps
+  working. `pnpm build` makes a normal build without hot reload, into the same
+  `extension/dist`: while `pnpm dev` runs, save any file afterwards so the watch
+  puts its own build back.
+- **Separate comments.** An unpacked extension's ID, and with it its stored
+  comments, depends on its folder. So `extension/dist` has its own comments,
+  apart from a release folder you loaded before.
+- **A build error** keeps the last good build running; fix it and save again.
+- **Not reloading?** Check the watch is running and that port 4778 is free (it
+  says so when it isn't). The extension's errors are under **Inspect views:
+  service worker** on its card in `brave://extensions`.
+- **How it works:** the watch serves its build number on `127.0.0.1:4778`; the
+  dev build's background asks for it, and reloads when it changes
+  (`extension/src/dev-reload.ts`). Normal and release builds leave that code out.
+
+### Firefox
+
 ```sh
-pnpm install
-pnpm build              # extension/dist (Chromium), extension/dist-firefox, server/dist/cli.js
-pnpm dev:extension      # rebuild the extension on every change
-pnpm test               # all tests (the MCP one runs it over stdio like Claude Code)
-pnpm typecheck
+pnpm dev:firefox
 ```
 
-Load `extension/dist` unpacked (see Setup). After a rebuild, click the reload icon
-on the extension card in `brave://extensions` and reload your app tab.
+Then `about:debugging`, **This Firefox**, **Load Temporary Add-on**, and pick
+`extension/dist-firefox/manifest.json`. Hot reload works the same (port 4779,
+so Chrome and Firefox watches can run side by side). Firefox drops temporary
+add-ons, and their comments, when it closes; load it again after a restart.
 
-To try the MCP server from this repo instead of npm:
+### Checks
+
+Run these before committing (CI runs the same):
 
 ```sh
-claude mcp add --scope user browser-review -- node /path/to/repo/server/src/cli.ts
+pnpm typecheck
+pnpm test               # all tests (the MCP one runs it over stdio like Claude Code)
+pnpm build              # extension/dist, extension/dist-firefox, server/dist/cli.js
 ```
 
 ### Releasing
