@@ -29,11 +29,11 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4 # pnpm version from "packageManager" in package.json
+      - uses: pnpm/action-setup@v6 # pnpm version from "packageManager" in package.json
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -66,7 +66,7 @@ jobs:
       - name: List the packages
         run: ls -l release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: browser-review-${{ steps.version.outputs.version }}
           path: release/*
@@ -83,15 +83,16 @@ jobs:
     outputs:
       created: ${{ steps.release.outputs.created }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # tags and history for the release notes
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false # no pnpm in this job
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: browser-review-${{ needs.build.outputs.version }}
           path: release
@@ -137,15 +138,16 @@ jobs:
         if: env.WEB_EXT_API_KEY == '' || env.WEB_EXT_API_SECRET == ''
         run: echo "::notice::Firefox signing skipped. Add the AMO_JWT_ISSUER and AMO_JWT_SECRET secrets (docs/releasing.md)."
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: env.WEB_EXT_API_KEY != ''
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         if: env.WEB_EXT_API_KEY != ''
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false # no pnpm in this job
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: env.WEB_EXT_API_KEY != ''
         with:
           name: browser-review-${{ needs.build.outputs.version }}
@@ -181,11 +183,12 @@ jobs:
       VERSION: ${{ needs.build.outputs.version }}
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
+          package-manager-cache: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: browser-review-${{ needs.build.outputs.version }}
           path: release
@@ -223,7 +226,7 @@ jobs:
         if: env.CWS_REFRESH_TOKEN == '' || env.CWS_EXTENSION_ID == ''
         run: echo "::notice::Chrome Web Store upload skipped. Add the CWS_* secrets and variables (docs/releasing.md)."
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: env.CWS_REFRESH_TOKEN != '' && env.CWS_EXTENSION_ID != ''
         with:
           name: browser-review-${{ needs.build.outputs.version }}

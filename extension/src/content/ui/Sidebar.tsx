@@ -319,7 +319,12 @@ function Thumb({ comment }: { comment: Comment }) {
       onClick={(e) => {
         e.preventDefault();
         const w = window.open();
-        if (w) w.document.body.innerHTML = `<img src="${src}" style="max-width:100%">`;
+        if (w) {
+          const img = w.document.createElement('img');
+          img.src = src;
+          img.style.maxWidth = '100%';
+          w.document.body.append(img);
+        }
       }}
       title="Screenshot when the comment was made"
     >
