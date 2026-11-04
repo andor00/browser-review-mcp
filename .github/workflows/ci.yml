@@ -102,9 +102,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
+        # Safe to rerun: each step checks what is already there, and GitHub API
+        # calls are retried (an outage once left an empty draft behind).
         run: |
           tag="v$VERSION"
-          if gh release view "$tag" >/dev/null 2>&1; then
+          retry() {
+            for i in 1 2 3 4 5; do
+              "$@" && return 0
+              echo "Failed, retrying in $((i * 15))s"
+              sleep $((i * 15))
+            done
+            return 1
+          }
+          # "none" (new version), "true" (draft left by a failed run) or "false" (released).
+          state=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          if [ "$state" = "false" ]; then
             echo "Release $tag already exists: the version did not change, nothing to publish."
             echo "created=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -112,10 +124,13 @@ jobs:
           prev=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
           node scripts/release-notes.ts "$VERSION" "$prev" > notes.md
           cat notes.md
-          gh release create "$tag" release/* \
-            --target "$GITHUB_SHA" \
-            --title "Browser Review $VERSION" \
-            --notes-file notes.md
+          make_draft() {
+            gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft \
+              --target "$GITHUB_SHA" --title "Browser Review $VERSION" --notes-file notes.md
+          }
+          retry make_draft
+          retry gh release upload "$tag" release/* --clobber
+          retry gh release edit "$tag" --draft=false --latest
           echo "created=true" >> "$GITHUB_OUTPUT"
 
   # ---------- signing and stores: each one runs once its secrets are set (see docs/releasing.md) ----------
