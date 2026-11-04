@@ -35,7 +35,7 @@ async function guarded(fn: () => ToolResult | Promise<ToolResult>): Promise<Tool
 
 const idSchema = z.number().int().positive().describe('Comment id, the number after # (for example 12).');
 
-const INSTRUCTIONS = `Review comments the user left on their localhost dev app with the Browser Review extension.
+const INSTRUCTIONS = `Review comments the user left on their dev app (localhost, a dev domain like *.test, or another site they turned on) with the Browser Review extension.
 Each comment is a general page comment or pinned to one element, and is either a plain comment, a request to remove the element, or a request to edit it (text and CSS).
 Workflow: list_comments, then for each one get_comment, start_work, fix it in the source code, optionally capture_screenshot to check, then submit_solution with a short note on how you solved it.
 You can only set "in progress" and "review ready". The user accepts or reopens in the browser. Use reply to ask the user a question in the thread.`;

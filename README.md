@@ -1,6 +1,6 @@
 # Browser Review
 
-Review your own localhost dev app in Brave, Chrome or Firefox the way you would
+Review your own dev app in Brave, Chrome or Firefox the way you would
 in Figma, and let Claude Code fix it.
 
 - **Comment** on the whole page or on one element. A numbered pin marks it.
@@ -23,8 +23,11 @@ You never start a server yourself: Claude Code starts `browser-review-mcp` with
 each session (like Browser MCP), and the extension connects to it. Comments live
 in the extension, so you can review while no Claude session is open.
 
-Works only on `http://localhost` and `http://127.0.0.1` pages. Everything stays
-on your machine.
+Runs by itself on local addresses (`localhost`, `127.0.0.1`) and dev domains
+like `*.test` (Herd, Valet) or `*.ddev.site`; on any other site (a dev server,
+staging) once you turn it on with the extension icon. A strict mode keeps it to
+localhost only. Everything stays on your machine. See
+[Where it works](#where-it-works).
 
 ## See it
 
@@ -95,9 +98,9 @@ The **help page** opens on install. It's also under right-click on the icon,
 in the overlay. It shows the setup command and
 whether Claude Code is connected.
 
-Brave asks for access to all sites. That is only for screenshots: Chrome only
-allows the screenshot API with that permission. The overlay itself only runs on
-localhost.
+Brave asks for access to all sites. Chrome only allows the screenshot API with
+that permission, and it lets the overlay run on the sites you turn on. The
+overlay only runs where you allow it: see [Where it works](#where-it-works).
 
 ### 2. Connect Claude Code (once)
 
@@ -191,10 +194,25 @@ F5): an unsent comment, removal or edit reopens on the same element with your
 text, and so do unsent replies. Drafts are kept per tab until you save, cancel
 or close the tab.
 
-On any other page, the extension icon (and the shortcuts) open a short note that
-it only works on localhost, with buttons to switch to your open localhost tabs.
-On a localhost tab that was open before you loaded the extension, it asks you to
+On a site that is not on yet, the first click on the extension icon turns
+Browser Review on there (the side panel also has a **Turn on for this site**
+button). Where it can't run (browser pages, or other sites in strict mode) the
+icon opens a short note instead, with buttons to switch to the tabs where it
+runs. On a tab that was open before you loaded the extension, it asks you to
 reload the page.
+
+### Where it works
+
+| Where | Runs |
+|---|---|
+| `localhost`, `127.0.0.1`, `[::1]` (http or https, any port) | by itself |
+| Dev domains: `*.test` (Herd, Valet), `*.localhost`, `*.local`, `*.internal`, `*.ddev.site`, `*.lndo.site` | by itself |
+| Any other site: a dev server on your network, staging | once you click the extension icon there (that exact address and port); remembered |
+
+The help page, **Where it works**, lists the sites you turned on, with a
+**Remove** button each, and has the **strict mode** setting: only `localhost`,
+`127.0.0.1` and `[::1]`, no dev domains, and the icon doesn't turn on other
+sites.
 
 ### Statuses
 
@@ -240,7 +258,13 @@ another takes over.
 - Only the extension (a `chrome-extension://` or `moz-extension://` origin) may
   connect as the extension, and only local non-browser processes (other Claude Code sessions)
   as peers. Websites, including other localhost apps, get a 403.
-- Nothing leaves your machine.
+- The overlay only runs where you allow it (see [Where it works](#where-it-works)).
+  Where it runs, it can read the page: that is how it picks elements, takes
+  screenshots and finds React components. So it doesn't run anywhere by
+  default except local addresses and dev domains, and you can make it stricter:
+  localhost only.
+- Nothing leaves your machine: comments and screenshots stay in the browser and
+  only go to the Claude Code sessions on this computer.
 
 ## Development
 

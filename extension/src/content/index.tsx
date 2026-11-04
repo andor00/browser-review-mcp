@@ -1,4 +1,4 @@
-// Content script entry: mounts the overlay in a Shadow DOM on localhost pages.
+// Content script entry: mounts the overlay in a Shadow DOM on the pages it may run on (sites.ts).
 import { render } from 'preact';
 import css from './styles.css';
 import { App } from './App.tsx';

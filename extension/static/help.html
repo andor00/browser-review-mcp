@@ -127,6 +127,18 @@
         font: inherit;
         cursor: pointer;
       }
+      .site-list {
+        padding: 0;
+        list-style: none;
+      }
+      .site-list li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--line);
+      }
       select {
         font: inherit;
         padding: 3px 6px;
@@ -271,7 +283,7 @@
         <h1>Browser Review</h1>
       </header>
       <p class="lead">
-        Comment on your localhost app like in Figma, remove or edit elements, and let Claude Code fix it in the code.
+        Comment on your dev app like in Figma, remove or edit elements, and let Claude Code fix it in the code.
       </p>
 
       <div id="status" class="status" role="status">
@@ -286,7 +298,7 @@
         <span class="dot"></span>
         <div>
           <strong>Browser Review can't see your pages yet</strong>
-          <span>It needs access to websites to show the overlay on localhost and take screenshots. Nothing runs on other sites.</span>
+          <span>It needs access to websites to show the overlay on your dev app and take screenshots. It only runs where you allow it: see Where it works.</span>
         </div>
         <button class="copy" id="grant">Allow access</button>
       </div>
@@ -320,7 +332,7 @@
       <section id="review">
         <h2><span class="step">2</span>Review your app</h2>
         <ol>
-          <li>Open your dev app on <code>http://localhost</code> or <code>http://127.0.0.1</code> (any port).</li>
+          <li>Open your dev app: <code>http://localhost</code> or <code>127.0.0.1</code> (any port), a dev domain like <code>https://my-app.test</code> (Herd, Valet, DDEV), or any other site you turn on (see <a href="#sites">Where it works</a>).</li>
           <li>Click the Browser Review icon in the toolbar (pin it via the puzzle icon if you don't see it). The review sidebar opens in the browser's side panel, next to your page.</li>
           <li>
             <strong>Pick element</strong> (or hold down <kbd>Left Alt</kbd>: the picker starts right away and stops when you let go), click what you want changed, and choose:
@@ -392,6 +404,37 @@
         </p>
       </section>
 
+      <section id="sites">
+        <h2>Where it works</h2>
+        <p>
+          By default Browser Review runs by itself on local addresses (<code>localhost</code>, <code>127.0.0.1</code>,
+          <code>[::1]</code>) and dev domains: <code>*.test</code> (Herd, Valet), <code>*.localhost</code>,
+          <code>*.local</code>, <code>*.internal</code>, <code>*.ddev.site</code> and <code>*.lndo.site</code>.
+        </p>
+        <p>
+          A dev server on another address, or a staging site? Open it and click the Browser Review icon: it asks nothing
+          and turns on for that site (that exact address and port), and stays on there. Nothing runs on sites you did
+          not turn on.
+        </p>
+        <p>
+          <label for="site-access"><strong>Runs on</strong></label>
+          <select id="site-access"></select>
+        </p>
+        <p class="dim">
+          Strict mode keeps it to <code>localhost</code>, <code>127.0.0.1</code> and <code>[::1]</code> only: no dev
+          domains, and the icon doesn't turn on other sites. Pick it if you'd rather be sure it never runs anywhere else.
+        </p>
+        <h3>Sites you turned on</h3>
+        <ul id="site-list" class="site-list"></ul>
+        <p id="no-sites" class="dim" hidden>None yet.</p>
+        <h3>Security</h3>
+        <ul>
+          <li>On a site where it runs, the overlay can read the page (to pick elements, take screenshots and find the React component). That is why it only runs where you allow it.</li>
+          <li>Comments, screenshots and settings stay in this browser. They only go to the Claude Code sessions on this computer, over <code>127.0.0.1</code>.</li>
+          <li>Turning a site off here stops the overlay from loading there; reload tabs that are open on it. Its comments stay until you delete them.</li>
+        </ul>
+      </section>
+
       <section id="trouble">
         <h2>Troubleshooting</h2>
         <details>
@@ -407,7 +450,7 @@
         <details>
           <summary>Nothing happens when I click the icon</summary>
           <ul>
-            <li>It only works on <code>http://localhost</code> and <code>http://127.0.0.1</code> pages. On other pages the icon shows a short note.</li>
+            <li>On a site that is not on yet, the first click turns it on. In strict mode it only runs on <code>localhost</code>, <code>127.0.0.1</code> and <code>[::1]</code>; elsewhere the icon shows a short note. See <a href="#sites">Where it works</a>.</li>
             <li>Was the tab open before you installed or reloaded the extension? Reload the page.</li>
           </ul>
         </details>

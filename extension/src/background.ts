@@ -29,12 +29,22 @@ import {
   type TabRequest,
 } from './messages.ts';
 import { startDevReload } from './dev-reload.ts';
-import { isLocalUrl } from './local.ts';
+import {
+  SITE_ACCESS_KEY,
+  SITES_KEY,
+  canTurnOn,
+  isAllowed,
+  isWebUrl,
+  matchPatterns,
+  originOf,
+  toSiteAccess,
+  toSites,
+  type SiteSettings,
+} from './sites.ts';
 import { IdbDb } from './idb.ts';
 import { Store } from './store.ts';
 
 const WS_URL = `ws://127.0.0.1:${DEFAULT_PORT}/ws`;
-const LOCAL_TABS = ['http://localhost/*', 'http://127.0.0.1/*'];
 const VERSION = chrome.runtime.getManifest().version;
 
 const store = new Store(new IdbDb());
@@ -165,7 +175,7 @@ function broadcast(ev: PortEvent): void {
 // The service worker can be stopped by the browser. Alarms wake it up so it reconnects.
 chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
 // Only in `pnpm dev` builds (see dev-reload.ts).
-if (__DEV_RELOAD__) startDevReload(__DEV_RELOAD__, LOCAL_TABS);
+if (__DEV_RELOAD__) startDevReload(__DEV_RELOAD__, () => overlayTabs());
 
 chrome.alarms.onAlarm.addListener(() => connect());
 chrome.runtime.onStartup.addListener(() => connect());
@@ -260,6 +270,13 @@ chrome.runtime.onMessage.addListener((req: ContentRequest, sender, sendResponse)
     focusThread(req.id);
     return false;
   }
+  if (req.type === 'turn-on') {
+    void chrome.tabs
+      .get(req.tabId)
+      .then((tab) => sendToTab(tab, { type: 'show', visible: true }))
+      .catch(() => {});
+    return false;
+  }
   return false;
 });
 
@@ -313,7 +330,7 @@ function focusThread(id: number): void {
 /** Tells the overlays in the window whether the panel is open (the Threads button shows it). */
 async function notifyPanelState(windowId: number): Promise<void> {
   const open = panelPorts.has(windowId);
-  for (const tab of await chrome.tabs.query({ windowId, url: LOCAL_TABS })) {
+  for (const tab of await overlayTabs({ windowId })) {
     if (tab.id !== undefined) {
       void chrome.tabs.sendMessage(tab.id, { type: 'panel-state', open } satisfies TabRequest).catch(() => {});
     }
@@ -325,8 +342,12 @@ async function runStoreOp(op: keyof StoreOps, args: unknown): Promise<unknown> {
   switch (op) {
     case 'list':
       return store.list({ origin: a('list').origin });
-    case 'create':
-      return changed(await store.create(a('create')));
+    case 'create': {
+      const input = a('create');
+      await siteSettingsReady;
+      if (!isAllowed(input.url, siteSettings)) throw new Error('Browser Review is not on for this site.');
+      return changed(await store.create(input));
+    }
     case 'reply': {
       const p = a('reply');
       return changed(await store.addMessage(p.id, 'user', p.body));
@@ -383,7 +404,7 @@ async function capture(windowId: number, rect: Rect | null, viewport: Viewport):
 
 /** Live screenshot asked for by Claude over MCP. */
 async function captureForComment(c: Comment): Promise<{ page: string; element: string | null; note: string | null }> {
-  const tabs = await chrome.tabs.query({ url: LOCAL_TABS });
+  const tabs = await overlayTabs();
   const matching = tabs.filter((t) => {
     if (!t.url || t.id === undefined) return false;
     const k = pageKey(t.url);
@@ -413,28 +434,114 @@ async function captureForComment(c: Comment): Promise<{ page: string; element: s
   }
 }
 
-// ---------- toggle, shortcuts, and the "only on localhost" notice ----------
+// ---------- which sites the overlay runs on (see sites.ts) ----------
 
-const NOTICE = 'notice.html';
+let siteSettings: SiteSettings = { access: 'any', sites: [] };
+const siteSettingsReady = loadSiteSettings();
+
+async function loadSiteSettings(): Promise<void> {
+  const r = await chrome.storage.local.get([SITE_ACCESS_KEY, SITES_KEY]);
+  siteSettings = { access: toSiteAccess(r[SITE_ACCESS_KEY]), sites: toSites(r[SITES_KEY]) };
+  await syncContentScripts();
+}
+
+// Changed on the help page (strict mode, a site removed) or by turnOn().
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && (SITE_ACCESS_KEY in changes || SITES_KEY in changes)) {
+    void loadSiteSettings().then(syncAllPopups);
+  }
+});
+
+/** Tabs whose page the overlay runs on. */
+async function overlayTabs(query: chrome.tabs.QueryInfo = {}): Promise<chrome.tabs.Tab[]> {
+  await siteSettingsReady;
+  return (await chrome.tabs.query(query)).filter((t) => t.url && isAllowed(t.url, siteSettings));
+}
 
 /**
- * Off localhost the action opens a popup that explains why nothing happens.
- * On localhost the popup is off, so a click reaches onClicked and toggles the overlay.
+ * The content scripts are registered from code, not in the manifest, so the
+ * sites can change. Registered once; again only when the sites change.
+ */
+const SCRIPTS: chrome.scripting.RegisteredContentScript[] = [
+  { id: 'brm-main-world', js: ['main-world.js'], world: 'MAIN', runAt: 'document_start' },
+  { id: 'brm-overlay', js: ['content.js'], runAt: 'document_idle' },
+];
+let scriptSync: Promise<void> = Promise.resolve();
+
+function syncContentScripts(): Promise<void> {
+  scriptSync = scriptSync
+    .then(async () => {
+      const matches = matchPatterns(siteSettings);
+      const key = (m: string[] | undefined) => JSON.stringify([...(m ?? [])].sort());
+      const current = await chrome.scripting.getRegisteredContentScripts({ ids: SCRIPTS.map((s) => s.id) });
+      if (current.length === SCRIPTS.length && current.every((c) => key(c.matches) === key(matches))) return;
+      if (current.length) await chrome.scripting.unregisterContentScripts({ ids: current.map((c) => c.id) });
+      try {
+        await chrome.scripting.registerContentScripts(SCRIPTS.map((s) => ({ ...s, matches })));
+      } catch (err) {
+        // One pattern the browser rejects fails them all: keep at least local addresses and the sites turned on.
+        console.error('Browser Review: some sites could not be registered', err);
+        const safe = matchPatterns({ access: 'local', sites: [] }).concat(
+          matchPatterns({ access: 'any', sites: siteSettings.sites }).filter((m) => !m.startsWith('*://*.')),
+        );
+        await chrome.scripting.registerContentScripts(SCRIPTS.map((s) => ({ ...s, matches: [...new Set(safe)] })));
+      }
+    })
+    .catch((err: unknown) => console.error('Browser Review: registering the content scripts failed', err));
+  return scriptSync;
+}
+
+/**
+ * The extension icon (or a shortcut) on a site that is not on yet: remember the
+ * site, and load the overlay into this tab right away.
+ */
+async function turnOn(tab: chrome.tabs.Tab): Promise<boolean> {
+  const origin = tab.url ? originOf(tab.url) : null;
+  if (!origin || tab.id === undefined) return false;
+  siteSettings = { ...siteSettings, sites: [...new Set([...siteSettings.sites, origin])] };
+  await chrome.storage.local.set({ [SITES_KEY]: siteSettings.sites });
+  await syncContentScripts();
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['main-world.js'], world: 'MAIN' });
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+  } catch {
+    return false; // a page the browser protects (the web store, for example)
+  }
+  syncPopup(tab.id, tab.url);
+  return true;
+}
+
+// ---------- toggle, shortcuts, and the notice where it can't run ----------
+
+const NOTICE = 'notice.html';
+type NoticeReason = 'strict' | 'not-web' | 'not-loaded';
+
+/**
+ * Where the overlay can't run, the action opens a popup that explains why. Elsewhere
+ * the popup is off, so a click reaches onClicked: it toggles the overlay, or turns
+ * the site on first.
  */
 function syncPopup(tabId: number, url: string | undefined): void {
-  const popup = url && isLocalUrl(url) ? '' : `${NOTICE}?reason=not-localhost`;
+  let popup = '';
+  if (!url || !(isAllowed(url, siteSettings) || canTurnOn(url, siteSettings))) {
+    popup = `${NOTICE}?reason=${url && isWebUrl(url) ? 'strict' : 'not-web'}`;
+  }
   void chrome.action.setPopup({ tabId, popup }).catch(() => {});
+}
+
+function syncAllPopups(): void {
+  void chrome.tabs.query({}).then((tabs) => {
+    for (const t of tabs) if (t.id !== undefined) syncPopup(t.id, t.url);
+  });
 }
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.url !== undefined || info.status === 'loading') syncPopup(tabId, tab.url);
 });
-void chrome.tabs.query({}).then((tabs) => {
-  for (const t of tabs) if (t.id !== undefined) syncPopup(t.id, t.url);
-});
+void siteSettingsReady.then(syncAllPopups);
 
-/** Opens the notice popup from code (shortcuts, or a localhost tab without the overlay). */
-async function showNotice(tab: chrome.tabs.Tab, reason: 'not-localhost' | 'not-loaded'): Promise<void> {
+/** Opens the notice popup from code (shortcuts, or a tab without the overlay). */
+async function showNotice(tab: chrome.tabs.Tab, reason: NoticeReason): Promise<void> {
   if (tab.id === undefined) return;
   await chrome.action.setPopup({ tabId: tab.id, popup: `${NOTICE}?reason=${reason}` });
   try {
@@ -448,14 +555,25 @@ async function showNotice(tab: chrome.tabs.Tab, reason: 'not-localhost' | 'not-l
 
 async function sendToTab(tab: chrome.tabs.Tab | undefined, req: TabRequest): Promise<void> {
   if (tab?.id === undefined) return;
-  if (!tab.url || !isLocalUrl(tab.url)) return showNotice(tab, 'not-localhost');
-  try {
-    await chrome.tabs.sendMessage(tab.id, req);
-  } catch (err) {
-    // Nothing listens: the tab was open before the extension was (re)loaded.
-    // (Other errors, like no reply to a fire-and-forget message, are fine.)
-    if (/Receiving end does not exist|Could not establish connection/i.test(String(err))) {
-      await showNotice(tab, 'not-loaded');
+  await siteSettingsReady;
+  const url = tab.url ?? '';
+  let justTurnedOn = false;
+  if (!isAllowed(url, siteSettings)) {
+    if (!canTurnOn(url, siteSettings)) return showNotice(tab, isWebUrl(url) ? 'strict' : 'not-web');
+    if (!(await turnOn(tab))) return showNotice(tab, 'not-web');
+    justTurnedOn = true;
+  }
+  // A freshly loaded overlay needs a moment before it listens.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, req);
+      return;
+    } catch (err) {
+      // Nothing listens: the tab was open before the extension was (re)loaded.
+      // (Other errors, like no reply to a fire-and-forget message, are fine.)
+      if (!/Receiving end does not exist|Could not establish connection/i.test(String(err))) return;
+      if (!justTurnedOn || attempt >= 10) return showNotice(tab, 'not-loaded');
+      await new Promise((r) => setTimeout(r, 100));
     }
   }
 }
@@ -479,8 +597,10 @@ chrome.action.onClicked.addListener((tab) => toggleAll(tab));
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command === 'toggle-overlay') toggleAll(tab);
   else if (command === 'toggle-threads' && PANEL_SUPPORTED && tab?.windowId !== undefined) {
-    if (tab.url && !isLocalUrl(tab.url) && !panelPorts.has(tab.windowId)) void showNotice(tab, 'not-localhost');
-    else togglePanel(tab.windowId);
+    const url = tab.url ?? '';
+    if (!panelPorts.has(tab.windowId) && !isAllowed(url, siteSettings) && !canTurnOn(url, siteSettings)) {
+      void showNotice(tab, isWebUrl(url) ? 'strict' : 'not-web');
+    } else togglePanel(tab.windowId);
   } else if (OVERLAY_COMMANDS.includes(command)) {
     void sendToTab(tab, { type: 'command', command: command as OverlayCommand });
   }

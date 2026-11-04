@@ -1,8 +1,8 @@
 // The action popup shown where the overlay cannot run (see showNotice in background.ts).
-import { isLocalUrl } from './local.ts';
+import { SITE_ACCESS_KEY, SITES_KEY, isAllowed, toSiteAccess, toSites } from './sites.ts';
 
 const params = new URLSearchParams(location.search);
-const reason = params.get('reason') === 'not-loaded' ? 'not-loaded' : 'not-localhost';
+const reason = params.get('reason');
 const $ = (id: string) => document.getElementById(id)!;
 
 $('help').addEventListener('click', () => {
@@ -12,9 +12,9 @@ $('help').addEventListener('click', () => {
 
 async function main(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  $(reason).hidden = false;
 
   if (reason === 'not-loaded') {
+    $('not-loaded').hidden = false;
     $('reload').addEventListener('click', () => {
       if (tab?.id !== undefined) void chrome.tabs.reload(tab.id);
       window.close();
@@ -22,9 +22,21 @@ async function main(): Promise<void> {
     return;
   }
 
+  $('not-here').hidden = false;
+  if (reason === 'strict') {
+    $('not-here-title').textContent = 'Strict mode is on';
+    $('not-here-text').textContent =
+      'Browser Review only runs on localhost, 127.0.0.1 and [::1]. To use it on other sites, change "Where it works" on the help page.';
+  } else {
+    $('not-here-title').textContent = "Can't run on this page";
+    $('not-here-text').textContent =
+      'Browser Review runs on web pages (http and https), like your dev app. Browser pages and files are out of reach.';
+  }
   $('here').textContent = tab?.url ? shortUrl(tab.url) : 'not a web page';
 
-  const local = (await chrome.tabs.query({})).filter((t) => t.url && isLocalUrl(t.url));
+  const r = await chrome.storage.local.get([SITE_ACCESS_KEY, SITES_KEY]);
+  const settings = { access: toSiteAccess(r[SITE_ACCESS_KEY]), sites: toSites(r[SITES_KEY]) };
+  const local = (await chrome.tabs.query({})).filter((t) => t.url && isAllowed(t.url, settings));
   if (local.length === 0) {
     $('no-tabs').hidden = false;
     return;

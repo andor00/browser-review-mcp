@@ -8,7 +8,17 @@ import { pageKey, type Comment } from '@brm/shared';
 import css from './content/styles.css';
 import { bridge } from './content/bridge.ts';
 import { Sidebar } from './content/ui/Sidebar.tsx';
-import { isLocalUrl } from './local.ts';
+import {
+  SITE_ACCESS_KEY,
+  SITES_KEY,
+  canTurnOn,
+  isAllowed,
+  isWebUrl,
+  originOf,
+  toSiteAccess,
+  toSites,
+  type SiteSettings,
+} from './sites.ts';
 import { PANEL_FOCUS_KEY, type GoToResponse, type PanelRequest, type TabRequest } from './messages.ts';
 
 /** Firefox closes its sidebar with this; Chrome's panel closes with window.close(). */
@@ -44,6 +54,24 @@ function useActiveTab(windowId: number): ActiveTab | null {
   return tab;
 }
 
+/** Strict mode and the sites turned on, live (the help page or the icon change them). */
+function useSiteSettings(): SiteSettings | null {
+  const [settings, setSettings] = useState<SiteSettings | null>(null);
+  useEffect(() => {
+    const read = () =>
+      void chrome.storage.local
+        .get([SITE_ACCESS_KEY, SITES_KEY])
+        .then((r) => setSettings({ access: toSiteAccess(r[SITE_ACCESS_KEY]), sites: toSites(r[SITES_KEY]) }));
+    read();
+    const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === 'local' && (SITE_ACCESS_KEY in changes || SITES_KEY in changes)) read();
+    };
+    chrome.storage.onChanged.addListener(onChange);
+    return () => chrome.storage.onChanged.removeListener(onChange);
+  }, []);
+  return settings;
+}
+
 function close(): void {
   if (sidebarAction) void sidebarAction.close();
   else window.close();
@@ -55,8 +83,9 @@ function sendToTab<T>(tabId: number, req: TabRequest): Promise<T> {
 
 function PanelApp({ windowId }: { windowId: number }) {
   const tab = useActiveTab(windowId);
-  const local = tab !== null && isLocalUrl(tab.url);
-  const { origin, path } = local ? pageKey(tab.url) : { origin: '', path: '' };
+  const settings = useSiteSettings();
+  const allowed = tab !== null && settings !== null && isAllowed(tab.url, settings);
+  const { origin, path } = allowed ? pageKey(tab.url) : { origin: '', path: '' };
   const [comments, setComments] = useState<Comment[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -111,7 +140,7 @@ function PanelApp({ windowId }: { windowId: number }) {
     return () => chrome.runtime.onMessage.removeListener(onMessage);
   }, [windowId]);
 
-  if (!local || !tab) {
+  if (!allowed || !tab) {
     return (
       <aside class="brm-ui brm-sidebar is-docked" aria-label="Review threads">
         <header class="brm-side-head">
@@ -124,11 +153,7 @@ function PanelApp({ windowId }: { windowId: number }) {
             ✕
           </button>
         </header>
-        <p class="brm-panel-empty">
-          <strong>Not a localhost page</strong>
-          Browser Review works on your app running on http://localhost or http://127.0.0.1. Open it in this tab and its
-          threads show here.
-        </p>
+        <NotHere tab={tab} settings={settings} />
       </aside>
     );
   }
@@ -155,6 +180,48 @@ function PanelApp({ windowId }: { windowId: number }) {
       onOpenPage={(c) => void chrome.tabs.update(tab.id, { url: c.url })}
       onChanged={load}
     />
+  );
+}
+
+/** Why there are no threads for this tab, and what to do about it. */
+function NotHere({ tab, settings }: { tab: ActiveTab | null; settings: SiteSettings | null }) {
+  if (!settings) return null;
+  if (tab && canTurnOn(tab.url, settings)) {
+    return (
+      <div class="brm-panel-empty">
+        <strong>Browser Review is off on this site</strong>
+        <p>
+          Turn it on for <code>{originOf(tab.url)}</code> to review it. It stays on for this site until you remove it on
+          the help page.
+        </p>
+        <button
+          class="brm-btn brm-primary"
+          onClick={() => void chrome.runtime.sendMessage({ type: 'turn-on', tabId: tab.id }).catch(() => {})}
+        >
+          Turn on for this site
+        </button>
+      </div>
+    );
+  }
+  if (tab && isWebUrl(tab.url) && settings.access === 'local') {
+    return (
+      <div class="brm-panel-empty">
+        <strong>Strict mode is on</strong>
+        <p>
+          Browser Review only runs on localhost, 127.0.0.1 and [::1]. To use it on other sites, change{' '}
+          <a href="#" onClick={(e) => (e.preventDefault(), bridge.openHelp('sites'))}>
+            Where it works
+          </a>{' '}
+          on the help page.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div class="brm-panel-empty">
+      <strong>Open your app in this tab</strong>
+      <p>Its threads show here. Browser Review runs on web pages, not on browser pages like this one.</p>
+    </div>
   );
 }
 

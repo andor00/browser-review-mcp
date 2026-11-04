@@ -61,9 +61,14 @@ describe('create', () => {
     assert.equal((await store.latestScreenshot(c.id, 'element', 'initial'))?.id, c.screenshots[1]!.id);
   });
 
+  it('takes any web page: dev domains and sites turned on are the background\'s call', async () => {
+    const c = await store.create({ ...base, url: 'https://shop.test/cart' });
+    assert.equal(c.origin, 'https://shop.test');
+  });
+
   it('rejects bad input without leaving a half comment', async () => {
     assert.equal(await code(store.create({ ...base, body: '  ' })), 'bad_input');
-    assert.equal(await code(store.create({ ...base, url: 'https://example.com/' })), 'bad_input');
+    assert.equal(await code(store.create({ ...base, url: 'file:///home/me/index.html' })), 'bad_input');
     assert.equal(await code(store.create({ ...base, kind: 'remove', change: { kind: 'remove' } })), 'bad_input');
     assert.equal(await code(store.create({ ...base, kind: 'edit', target, change: { kind: 'remove' } })), 'bad_input');
     assert.equal(await code(store.create({ ...base, screenshots: { page: 'data:image/png;base64,AAAA' } })), 'bad_input');

@@ -12,6 +12,7 @@ import {
   type Solution,
   type Status,
 } from '@brm/shared';
+import { isWebUrl } from './sites.ts';
 
 export type StoreErrorCode = 'not_found' | 'invalid_transition' | 'bad_input';
 
@@ -91,7 +92,6 @@ export function checkPngDataUrl(dataUrl: string): string {
   return dataUrl;
 }
 
-const LOCAL_URL = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//;
 
 function now(): string {
   return new Date().toISOString();
@@ -137,7 +137,8 @@ export class Store {
 
   create(input: CreateCommentInput): Promise<Comment> {
     return this.#write(async () => {
-      if (!LOCAL_URL.test(input.url)) throw new StoreError('bad_input', 'Only localhost pages.');
+      // Which sites are allowed is the background's call (sites.ts); here only web pages.
+      if (!isWebUrl(input.url)) throw new StoreError('bad_input', 'Only http and https pages.');
       if (input.kind === 'comment' && !input.body.trim()) {
         throw new StoreError('bad_input', 'A comment needs some text.');
       }

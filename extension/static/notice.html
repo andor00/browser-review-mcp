@@ -107,15 +107,15 @@
     </style>
   </head>
   <body>
-    <section id="not-localhost" hidden>
-      <h1><img src="icons/48.png" alt="" />Only works on localhost</h1>
-      <p>Browser Review is for reviewing your own dev app, so it only runs on <code>http://localhost</code> and <code>http://127.0.0.1</code> (any port).</p>
+    <section id="not-here" hidden>
+      <h1><img src="icons/48.png" alt="" /><span id="not-here-title"></span></h1>
+      <p id="not-here-text"></p>
       <p class="dim">This page is <code id="here"></code></p>
       <div id="tabs" hidden>
-        <h2>Your localhost tabs</h2>
+        <h2>Tabs where it runs</h2>
         <ul id="tab-list"></ul>
       </div>
-      <p id="no-tabs" class="dim" hidden>Start your dev server and open it, for example <code>http://localhost:5173</code>.</p>
+      <p id="no-tabs" class="dim" hidden>Start your dev server and open it, for example <code>http://localhost:5173</code> or <code>https://my-app.test</code>.</p>
     </section>
 
     <section id="not-loaded" hidden>

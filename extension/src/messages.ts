@@ -25,7 +25,9 @@ export type ContentRequest =
   /** Show this thread in the side panel, if it is open. */
   | { type: 'focus-thread'; id: number }
   /** Answer: PanelState. */
-  | { type: 'panel-state' };
+  | { type: 'panel-state' }
+  /** From the side panel: turn Browser Review on for this tab's site and show the overlay. */
+  | { type: 'turn-on'; tabId: number };
 
 /** The browser may refuse to open the panel from a click in the page (no user gesture). */
 export interface PanelResponse {

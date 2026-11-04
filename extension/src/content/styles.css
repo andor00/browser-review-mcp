@@ -846,3 +846,7 @@ code {
 .brm-reload-note .brm-btn {
   margin-top: 8px;
 }
+
+.brm-panel-empty p {
+  margin: 0 0 12px;
+}

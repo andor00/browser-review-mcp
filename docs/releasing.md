@@ -89,14 +89,17 @@ One-time, by hand:
    release, and fill in:
    - **Store listing**: description, category (Developer Tools), at least one
      screenshot (1280x800), the 128px icon is in the zip.
-   - **Privacy**: single purpose ("review your own localhost web app and send
+   - **Privacy**: single purpose ("review your own web app in development and send
      the comments to Claude Code"), and why each permission is needed:
-     - `tabs`: find the tab of a comment's page, show the localhost notice
+     - `tabs`: find the tab of a comment's page, show where it can run
      - `storage`: remember overlay settings per site
      - `alarms`: reconnect to Claude Code when the browser wakes the extension
      - `sidePanel`: show the review threads in the browser's side panel, next to the page
-     - host access (all sites): `captureVisibleTab` screenshots need it; the
-       overlay itself only runs on localhost
+     - `scripting`: load the overlay on the sites the user turns on
+     - host access (all sites): `captureVisibleTab` screenshots need it, and
+       the overlay runs on the user's dev sites: local addresses and dev domains
+       by default, other sites only after the user turns them on (strict mode:
+       localhost only)
      - data use: collects nothing, sends nothing off the machine
    - **Distribution**: Public, or Unlisted (only people with the link).
 3. Submit for review. The first review can take days; broad host access means

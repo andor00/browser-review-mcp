@@ -5,22 +5,22 @@
 // The background long-polls the build id. When a new build is out it reloads
 // the extension (new background, content scripts, pages). Every fresh start of
 // the extension (this reload, the reload icon on its card, a browser restart)
-// reloads the localhost tabs, whose old content scripts are cut off by the
+// reloads the tabs the overlay runs in, whose old content scripts are cut off by the
 // reload. What was being typed in the overlay survives (drafts).
 
 // storage.session is emptied by a reload of the extension and survives the service worker sleeping.
 const BASELINE_KEY = 'devReloadBuild'; // build this extension was loaded at
 const STARTED_KEY = 'devReloadStarted'; // the tabs were reloaded after this start
 
-/** `url`: the build server's /build. `tabs`: match patterns of the tabs to reload. */
-export function startDevReload(url: string, tabs: string[]): void {
+/** `url`: the build server's /build. `tabs`: the tabs the overlay runs in (to reload). */
+export function startDevReload(url: string, tabs: () => Promise<chrome.tabs.Tab[]>): void {
   void (async () => {
     // A fresh start of the extension: the tabs still run the old content scripts.
     const stored = await chrome.storage.session.get([BASELINE_KEY, STARTED_KEY]);
     let baseline = stored[BASELINE_KEY] as string | undefined;
     if (!stored[STARTED_KEY]) {
       await chrome.storage.session.set({ [STARTED_KEY]: true });
-      for (const tab of await chrome.tabs.query({ url: tabs })) if (tab.id !== undefined) void chrome.tabs.reload(tab.id);
+      for (const tab of await tabs()) if (tab.id !== undefined) void chrome.tabs.reload(tab.id);
     }
     for (;;) {
       // An extension API call keeps the service worker awake while we wait.

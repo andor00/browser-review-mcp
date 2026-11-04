@@ -1,7 +1,8 @@
 # Browser Review
 
 A Brave/Chromium extension plus an MCP server (browser-review-mcp, on npm) that Claude Code starts, so the user can comment on,
-remove and edit elements of their localhost dev app and Claude picks the comments up
+remove and edit elements of their dev app (localhost, dev domains, sites they turn
+on) and Claude picks the comments up
 over MCP. See README.md for how it works and how to use it.
 
 ## Layout and commands
