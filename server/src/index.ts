@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { loadConfig, type Config } from './config.ts';
@@ -7,7 +8,8 @@ import { handleApi } from './api.ts';
 import { createMcp } from './mcp.ts';
 import { extensionAllowed, hostAllowed, mcpAllowed } from './security.ts';
 
-export const VERSION = '0.1.0';
+/** From package.json, which scripts/version.ts keeps in step with the root version. */
+export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 function deny(res: ServerResponse, why: string): void {
   res.writeHead(403, { 'content-type': 'text/plain' });
