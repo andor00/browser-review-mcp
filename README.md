@@ -26,6 +26,40 @@ in the extension, so you can review while no Claude session is open.
 Works only on `http://localhost` and `http://127.0.0.1` pages. Everything stays
 on your machine.
 
+## See it
+
+The toolbar sits at the bottom of your app: pick an element, comment on the
+whole page, or open the threads.
+
+**Tip:** hold down **Left Alt** and the element picker starts right away. Click
+an element while you hold it, or let go of Alt to stop. (Change the key or turn
+it off on the help page.)
+
+<img src="docs/screenshots/toolbar.png" alt="The Pebble demo app with the Browser Review toolbar at the bottom right" width="800">
+
+**Comment on an element.** Pick it (**Pick element**, or hold Left Alt), say what should change, send.
+
+<img src="docs/screenshots/comment-on-an-element.gif" alt="Picking the Start for free button and writing a comment" width="800">
+
+**Edit text or CSS, with a live preview.** Here the typo "acutally" becomes
+"actually". Claude gets the before and after, and fixes it in the code.
+
+<img src="docs/screenshots/edit-text-live.gif" alt="Picking the headline and fixing a typo in the Edit tab" width="800">
+
+**Comment on the whole page, then follow the threads** in the browser's side
+panel. The page gets narrower instead of being covered.
+
+<img src="docs/screenshots/page-comment-and-side-panel.gif" alt="Writing a page comment, then the side panel opens with the threads" width="800">
+
+**Claude picks them up.** Each thread shows its screenshot, the change, and
+Claude's progress. When Claude is done it marks the thread review ready; you
+accept it or reopen it.
+
+<img src="docs/screenshots/side-panel-claude-working.png" alt="The side panel next to the page, with three threads Claude is working on" width="800">
+
+Try it yourself on the demo app in this repo: `pnpm demo` (see
+[Try it on the demo app](#try-it-on-the-demo-app)).
+
 ## Setup
 
 ### 1. Install the extension
@@ -295,54 +329,6 @@ pnpm typecheck
 pnpm test               # all tests (the MCP one runs it over stdio like Claude Code)
 pnpm build              # extension/dist, extension/dist-firefox, server/dist/cli.js
 ```
-
-### Releasing
-
-GitHub Actions (`.github/workflows/ci.yml`) does it:
-
-- **Every push and pull request:** typecheck, tests, the Chrome/Brave/Edge zip,
-  the Firefox zip (checked with Mozilla's `web-ext lint`) and the MCP package.
-  Download them from the run's **Artifacts**.
-- **On main, when the version changed:** a GitHub release `v<version>` with the
-  files and release notes (install steps, plus the `feat`/`fix`/breaking
-  commits since the last release). The version bumps itself from commit messages
-  (below), so a `feat:` or `fix:` commit on main means a new release.
-- **Then, once their keys are set:** Mozilla signs the Firefox add-on (a `.xpi`
-  on the release), `browser-review-mcp` goes to npm, and the Chrome Web Store
-  gets the new version for review. What to set up, and why "signing" differs
-  per browser: [docs/releasing.md](docs/releasing.md).
-
-By hand:
-
-- **Extension zips:** `pnpm package` writes `release/browser-review-<version>-chrome.zip`
-  (Chrome, Brave, Edge) and `release/browser-review-<version>-firefox.zip` (release builds,
-  no sourcemaps). Brave can't install a zip directly: extract it and **Load
-  unpacked**. The zips are also what the Chrome Web Store and
-  addons.mozilla.org take. Check the Firefox one with
-  `npx web-ext lint --source-dir extension/dist-firefox`.
-- **MCP server on npm:** `pnpm publish:mcp` (needs `npm login` once). It builds
-  `server/dist/cli.js`, runs the stdio test against the bundle, and publishes
-  `browser-review-mcp`. pnpm refuses to publish with uncommitted changes.
-
-The version is the same for both and bumps itself from Conventional Commit
-messages: `fix:` bumps the patch, `feat:` the minor, `feat!:` or
-`BREAKING CHANGE:` the major. Git hooks check the message and do the bump
-(`pnpm install` turns them on). See [CLAUDE.md](CLAUDE.md).
-
-### Layout
-
-```
-shared/      types used by both sides, including the bridge protocol
-server/      browser-review-mcp: MCP over stdio + WebSocket bridge (npm package)
-extension/   MV3 extension: background worker with the store (IndexedDB),
-             overlay (Preact in a Shadow DOM), help page, notice popup.
-             One code base; build.ts makes the Chromium and the Firefox build.
-scripts/     version bumps from Conventional Commits
-.githooks/   commit-msg check and post-commit version bump
-docs/        plan
-```
-
-`BRM_PORT` changes the bridge port (default 4777), but the extension expects 4777.
 
 ## Sponsor
 
