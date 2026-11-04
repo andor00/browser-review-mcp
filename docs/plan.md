@@ -52,8 +52,12 @@ run on localhost. Nothing runs on other sites.
 
 ## What I can do in the browser
 
-A small toolbar sits in the bottom right corner. Toggle with the extension icon
-or Alt+Shift+R.
+A small toolbar sits in the bottom right corner. The extension icon or
+Alt+Shift+R shows the overlay with the threads sidebar open; again hides it.
+The sidebar's open state is remembered per site.
+
+Shortcuts: Alt+Shift+P pick an element, Alt+Shift+C page comment, Alt+Shift+T
+open or close the threads. They also bring a hidden overlay back.
 
 - **Comment on the page.** A general comment for the current page.
 - **Comment on an element.** Pick an element, write a comment. A numbered pin
@@ -69,6 +73,16 @@ or Alt+Shift+R.
 - **Sidebar.** All threads for this page or the whole site, filtered by status.
   Reply in threads. Claude's replies and solution notes show up live. Shows
   when the server is not running.
+- **Go to.** Every thread has Go to (scroll to the element; on another page,
+  open that page first and then show it; when the element is gone, land on the
+  page with a note) and Open page.
+- **Drafts survive reloads.** An unsaved comment, removal or edit (with the
+  picked element) and unsent replies are kept in the tab's sessionStorage and
+  come back after the app reloads (dev server restart, full HMR reload, F5).
+- **Not localhost.** On other pages the extension icon and shortcuts open a
+  small popup: it only works on localhost, with buttons for the open localhost
+  tabs. On a localhost tab opened before the extension loaded, it asks to
+  reload the page.
 
 ## Statuses
 
