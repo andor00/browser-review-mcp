@@ -131,7 +131,7 @@ To remove it: `claude mcp remove --scope user browser-review`.
 | Jump to a thread's element | **Go to** in the thread. On another page it opens that page first. If the element is gone, you land on the page. **Open page** always opens the page itself. |
 | Help | **?** in the toolbar or the sidebar |
 | Change the shortcuts | they are browser shortcuts: help page, **Change shortcuts** (`brave://extensions/shortcuts`; Firefox: about:addons, gear, Manage Extension Shortcuts) |
-| Save a comment | Ctrl+Enter |
+| Send a comment or reply | Enter (Shift+Enter for a new line). Prefer Enter for new lines? On the help page, set **Send** to Ctrl+Enter |
 | Cancel | Esc |
 
 After the extension is reloaded or updated, a page that was already open shows

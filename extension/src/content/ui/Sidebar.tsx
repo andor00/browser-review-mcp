@@ -3,6 +3,8 @@ import { KIND_LABELS, STATUS_LABELS, type Comment, type Status } from '@brm/shar
 import { bridge } from '../bridge.ts';
 import { describe } from '../targets.ts';
 import { replyDraft } from '../drafts.ts';
+import { useSendKey } from '../hooks.ts';
+import { isSendKey, sendKeyName } from '../../settings.ts';
 
 export type Filter = 'active' | Status | 'all';
 export type Scope = 'page' | 'site';
@@ -282,6 +284,7 @@ function Card({ comment: c, showPath, onThisPage, open, focused, onToggle, onHov
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const sendKey = useSendKey();
   const ref = useRef<HTMLElement>(null);
   const first = c.messages.find((m) => m.author === 'user');
 
@@ -371,9 +374,21 @@ function Card({ comment: c, showPath, onThisPage, open, focused, onToggle, onHov
           <textarea
             class="brm-reply"
             rows={2}
-            placeholder={c.status === 'review_ready' ? 'Not right? Say what is still wrong and reopen.' : 'Reply'}
+            placeholder={
+              c.status === 'review_ready'
+                ? `Not right? Say what is still wrong; ${sendKeyName(sendKey)} reopens.`
+                : `Reply; ${sendKeyName(sendKey)} sends`
+            }
             value={reply}
             onInput={(e) => setReply((e.target as HTMLTextAreaElement).value)}
+            onKeyDown={(e) => {
+              if (!isSendKey(e, sendKey)) return;
+              e.preventDefault();
+              // Never accepts by keyboard: on a finished thread it reopens, with the text.
+              if (busy || !reply.trim()) return;
+              if (c.status === 'review_ready' || c.status === 'accepted') void run(() => bridge.reopen(c.id, reply));
+              else void run(() => bridge.reply(c.id, reply));
+            }}
           />
           {error && <p class="brm-error">{error}</p>}
           {note && <p class="brm-note">{note}</p>}

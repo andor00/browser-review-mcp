@@ -1,7 +1,7 @@
 // The help page (help.html): setup command, live connection status, shortcuts.
 import { MCP_ADD_COMMAND } from '@brm/shared';
 import type { ContentRequest, StatusResponse } from './messages.ts';
-import { HOLD_KEY, HOLD_KEYS, toHoldKey } from './settings.ts';
+import { HOLD_KEY, HOLD_KEYS, SEND_KEY, SEND_KEYS, toHoldKey, toSendKey } from './settings.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -83,6 +83,13 @@ const holdSelect = $('hold-key') as HTMLSelectElement;
 for (const [code, label] of Object.entries(HOLD_KEYS)) holdSelect.add(new Option(label, code));
 void chrome.storage.local.get(HOLD_KEY).then((r) => (holdSelect.value = toHoldKey(r[HOLD_KEY])));
 holdSelect.addEventListener('change', () => void chrome.storage.local.set({ [HOLD_KEY]: holdSelect.value }));
+
+// ---------- send key ----------
+
+const sendSelect = $('send-key') as HTMLSelectElement;
+for (const [key, label] of Object.entries(SEND_KEYS)) sendSelect.add(new Option(label, key));
+void chrome.storage.local.get(SEND_KEY).then((r) => (sendSelect.value = toSendKey(r[SEND_KEY])));
+sendSelect.addEventListener('change', () => void chrome.storage.local.set({ [SEND_KEY]: sendSelect.value }));
 
 // ---------- browser differences ----------
 

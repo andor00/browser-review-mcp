@@ -5,7 +5,8 @@ import { bridge } from '../bridge.ts';
 import { withCapture } from '../capture.ts';
 import { textNodesOf, type Previews } from '../previews.ts';
 import { buildTarget, describe, probeReact, textOf } from '../targets.ts';
-import { useTrackedRect } from '../hooks.ts';
+import { useSendKey, useTrackedRect } from '../hooks.ts';
+import { isSendKey, sendKeyName } from '../../settings.ts';
 import { composerDraft, type ComposerDraft } from '../drafts.ts';
 import { px } from '../px.ts';
 
@@ -41,6 +42,7 @@ export function Composer({ el, initialKind, draft, notice, previews, onCreated, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const sendKey = useSendKey();
   const [openThread, setOpenThread] = useState(false);
   useEffect(() => {
     void chrome.storage.local.get(OPEN_THREAD_KEY).then((r) => setOpenThread(r[OPEN_THREAD_KEY] === true));
@@ -132,7 +134,7 @@ export function Composer({ el, initialKind, draft, notice, previews, onCreated, 
     if (e.key === 'Escape') {
       e.preventDefault();
       onCancel();
-    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    } else if (isSendKey(e, sendKey)) {
       e.preventDefault();
       void save();
     }
@@ -307,7 +309,7 @@ export function Composer({ el, initialKind, draft, notice, previews, onCreated, 
           <button class="brm-btn" onClick={onCancel} disabled={saving}>
             Cancel
           </button>
-          <button class="brm-btn brm-primary" title="Ctrl+Enter" onClick={() => void save()} disabled={saving}>
+          <button class="brm-btn brm-primary" title={sendKeyName(sendKey)} onClick={() => void save()} disabled={saving}>
             {saving ? 'Saving' : kind === 'comment' ? 'Add comment' : kind === 'remove' ? 'Remove element' : 'Save edit'}
           </button>
         </div>
