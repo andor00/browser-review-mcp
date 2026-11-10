@@ -189,6 +189,12 @@ of flaws is in [demo/README.md](demo/README.md); `git checkout demo/` resets it.
 | Send a comment or reply | Enter (Shift+Enter for a new line). Prefer Enter for new lines? On the help page, set **Send** to Ctrl+Enter |
 | Cancel | Esc |
 
+Pins find their element again after your app changes. When elements are added or
+removed around it, its position-based selector can point at the wrong element or
+none; Browser Review then looks for an element with the same tag and text. If the
+text itself was changed, the pin stays where it was. Selectors based on an id or
+attribute always win.
+
 After the extension is reloaded or updated, a page that was already open shows
 "Browser Review was reloaded" with a **Reload page** button: browsers don't put
 the new version into open tabs by themselves.

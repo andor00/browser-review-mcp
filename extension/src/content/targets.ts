@@ -145,17 +145,49 @@ export function buildTarget(el: Element): TargetInfo {
 
 /** Finds the element of a stored target. With several matches, the one with the same text wins. */
 export function findTarget(target: TargetInfo): Element | null {
-  for (const sel of target.selectors) {
+  // Only the final cssPath may yield to the original text elsewhere after siblings
+  // shift. Keep its hit when the old text is gone (an intentional edit); earlier
+  // selectors and direct id/attribute selectors remain authoritative.
+  for (let i = 0; i < target.selectors.length; i++) {
+    const sel = target.selectors[i]!;
     let matches: Element[];
     try {
       matches = [...document.querySelectorAll(sel)].filter((m) => !isOurs(m));
     } catch {
       continue;
     }
-    if (matches.length === 1) return matches[0] ?? null;
+    if (matches.length === 1) {
+      const match = matches[0]!;
+      // cssPath ends in a bare tag step, unlike an id or attribute selector.
+      const positional = i === target.selectors.length - 1
+        && /(?:^| > )[a-z][a-z0-9-]*(?::nth-of-type\(\d+\))?$/.test(sel);
+      if (positional && textOf(match) !== target.text) return findByText(target) ?? match;
+      return match;
+    }
     if (matches.length > 1) return matches.find((m) => textOf(m) === target.text) ?? matches[0] ?? null;
   }
-  return null;
+  return findByText(target);
+}
+
+function findByText(target: TargetInfo): Element | null {
+  if (!target.text) return null;
+  let closest: Element | null = null;
+  let closestDistance = Infinity;
+  // Stored rects are viewport-relative at comment time, so this tie-break is
+  // approximate after scrolling. Compare centers without changing those coordinates.
+  const x = target.rect.x + target.rect.width / 2;
+  const y = target.rect.y + target.rect.height / 2;
+  for (const el of document.getElementsByTagName(target.tag)) {
+    if (isOurs(el) || textOf(el) !== target.text) continue;
+    const rect = el.getBoundingClientRect();
+    // Compare rectangle centers; equal distances keep document order.
+    const distance = (rect.x + rect.width / 2 - x) ** 2 + (rect.y + rect.height / 2 - y) ** 2;
+    if (distance < closestDistance) {
+      closest = el;
+      closestDistance = distance;
+    }
+  }
+  return closest;
 }
 
 /** Short label like `button.save "Opslaan"` for the picker and sidebar. */
